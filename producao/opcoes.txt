@@ -1,0 +1,10 @@
+# Opções da produção em massa. Mude o que vem depois do sinal de igual e salve.
+
+qualidade = boa          # rapida (uns 13 min por 10 s), boa (uns 28 min) ou maxima (uns 55 min)
+segundos = 10            # quanto de cada vídeo usar (de 1 a 60)
+comecar_em = 0           # segundos a pular no começo de cada vídeo (ex.: 1.5, se ele começa de costas)
+alta_definicao = nao     # "sim": bem mais nitidez (720p restaurado), mas cada vídeo leva o dobro do tempo
+fluido = sim             # movimento suave: os quadros entre os gerados são calculados (segundos a mais)
+instagram = sim          # entrega no formato do Instagram (1080 de largura, 30 quadros por segundo)
+manter_cenario = sim     # "nao": a pessoa só copia os movimentos, no cenário da própria imagem
+desligar_no_fim = sim    # desliga a GPU quando a lista acabar, para poupar a sua cota

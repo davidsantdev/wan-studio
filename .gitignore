@@ -1,0 +1,29 @@
+__pycache__/
+.venv/
+data/
+logs/
+downloads/
+models-llm/
+node_modules/
+tests/.work/
+# segredos: o pareamento do notebook com o site e a credencial do Kaggle. Nao publique.
+free/pairing.json
+free/kaggle_token.txt
+free/abrir.html
+kaggle.json
+lightning/lightning_chave.txt
+# gerados por `python free/build.py`. O notebook leva o pareamento dentro dele: nao publique.
+free/wan_studio_free.ipynb
+Wan Studio.url
+# o que o usuario poe e recebe na producao em massa (fotos e videos dele)
+producao/pessoa/
+producao/videos/
+producao/prontos/
+producao/usados/
+producao/.envio/
+producao/.andamento.json
+producao/erros.txt
+# videos que ninguem buscou, guardados ao desligar a GPU (podem ser do usuario)
+resultados/*-*x*-*.mp4
+resultados/*-*x*-*.png
+.claude-dev-helper/

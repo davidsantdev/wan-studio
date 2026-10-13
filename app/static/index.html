@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0c0d">
+  <title>Wan Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0c0d'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23c8f31d' transform='rotate(45 16 16)'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>WAN STUDIO</div>
+    <button id="status" type="button" class="status" data-state="loading">Conectando…</button>
+  </header>
+
+  <main class="layout">
+    <form id="form" class="panel" autocomplete="off">
+      <div class="panel-scroll">
+      <div class="tabs" data-key="mode" role="tablist">
+        <button type="button" class="tab" role="tab" data-value="t2v">Texto → Vídeo</button>
+        <button type="button" class="tab" role="tab" data-value="i2v">Imagem → Vídeo</button>
+        <button type="button" class="tab" role="tab" data-value="flf">Início + Fim</button>
+        <button type="button" class="tab" role="tab" data-value="img">Imagem</button>
+        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
+      </div>
+      <p id="mode-note" class="note warn" hidden></p>
+
+      <div id="frames" class="frames" hidden>
+        <label class="drop" data-frame="start_image">
+          <input type="file" accept="image/*" hidden>
+          <span class="drop-label"><span class="drop-title">Frame inicial</span><small>clique ou arraste uma imagem</small></span>
+          <img alt="Imagem escolhida" hidden>
+          <button type="button" class="drop-clear" hidden aria-label="Remover imagem">×</button>
+        </label>
+        <label class="drop" data-frame="end_image" hidden>
+          <input type="file" accept="image/*" hidden>
+          <span class="drop-label">Frame final<small>clique ou arraste uma imagem</small></span>
+          <img alt="Frame final escolhido" hidden>
+          <button type="button" class="drop-clear" hidden aria-label="Remover imagem">×</button>
+        </label>
+        <label class="drop" data-frame="video" hidden>
+          <input type="file" accept="video/*" hidden>
+          <span class="drop-label"><span class="drop-title">Vídeo</span><small>clique ou arraste um vídeo (até 100 MB)</small></span>
+          <video muted loop playsinline hidden></video>
+          <button type="button" class="drop-clear" hidden aria-label="Remover vídeo">×</button>
+        </label>
+      </div>
+      <div id="swap-options" class="field" hidden>
+        <p class="note">A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
+        <label class="check">
+          <input type="checkbox" id="replace" checked>
+          <span>Manter o cenário do vídeo (desmarque para a pessoa só copiar os movimentos, no cenário da própria imagem)</span>
+        </label>
+        <span class="field-title">Qualidade</span>
+        <div class="segmented" data-key="quality">
+          <button type="button" data-value="rapida">Rápida<small>menor, ampliada</small></button>
+          <button type="button" data-value="boa">Boa<small>480p</small></button>
+          <button type="button" data-value="maxima">Máxima<small>576p</small></button>
+          <button type="button" data-value="ultra" hidden>Ultra<small>720p direto</small></button>
+        </div>
+        <label class="check" id="hd-row" hidden>
+          <input type="checkbox" id="hd">
+          <span>Alta definição: restaurar os detalhes e entregar em 720p (mais nítido; leva mais tempo)</span>
+        </label>
+        <label class="check" id="fluid-row" hidden>
+          <input type="checkbox" id="fluid">
+          <span>Movimento fluido: 32 quadros por segundo em vez de 16 (os quadros a mais são calculados em segundos)</span>
+        </label>
+        <p id="swap-estimate" class="note"></p>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <label class="field-title" for="prompt">Prompt</label>
+          <button type="button" id="enhance" class="link" hidden>Melhorar com IA</button>
+        </div>
+        <textarea id="prompt" rows="4" placeholder="Descreva a cena: quem aparece, onde, o que acontece, a luz…"></textarea>
+        <label id="auto-row" class="check" hidden>
+          <input type="checkbox" id="auto-enhance" checked>
+          <span>Traduzir para inglês e detalhar o prompt ao gerar</span>
+        </label>
+      </div>
+
+      <section class="field" id="presets-field">
+        <div class="subtabs" data-key="tab" role="tablist">
+          <button type="button" role="tab" data-value="camera">Câmera<span class="pick" data-pick="camera"></span></button>
+          <button type="button" role="tab" data-value="effect">Efeitos<span class="pick" data-pick="effect"></span></button>
+          <button type="button" role="tab" data-value="style">Estilo<span class="pick" data-pick="style"></span></button>
+        </div>
+        <div id="cameras" class="cameras" data-key="camera"></div>
+        <div id="effects" class="chips" data-key="effect" hidden></div>
+        <div id="styles" class="chips" data-key="style" hidden></div>
+      </section>
+
+      <section class="field">
+        <span class="field-title">Modelo</span>
+        <p id="swap-model" class="fixed-choice" hidden>Wan 2.2 Animate<small>troca de pessoa · 16 fps</small></p>
+        <div class="segmented" data-key="model">
+          <button type="button" data-value="5b">Wan 2.2 5B<small>rápido · 24 fps</small></button>
+          <button type="button" data-value="14b">Wan 2.2 14B<small>qualidade · 16 fps</small></button>
+        </div>
+        <label id="fast-row" class="check">
+          <input type="checkbox" id="fast" checked>
+          <span id="fast-label">Turbo</span>
+        </label>
+      </section>
+
+      <div class="row">
+        <section class="field" id="aspect-field">
+          <span class="field-title">Proporção</span>
+          <div class="segmented compact" data-key="aspect">
+            <button type="button" data-value="16:9">16:9</button>
+            <button type="button" data-value="9:16">9:16</button>
+            <button type="button" data-value="1:1">1:1</button>
+          </div>
+        </section>
+        <section class="field" id="resolution-field">
+          <span class="field-title">Resolução</span>
+          <div class="segmented compact" data-key="resolution">
+            <button type="button" data-value="480p">480p</button>
+            <button type="button" data-value="720p">720p</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="row">
+        <section class="field" id="duration-field">
+          <span class="field-title">Duração</span>
+          <div class="segmented compact" data-key="duration">
+            <button type="button" data-value="3">3 s</button>
+            <button type="button" data-value="5">5 s</button>
+          </div>
+          <div class="segmented compact" data-key="length" hidden>
+            <button type="button" data-value="5">5 s</button>
+            <button type="button" data-value="10">10 s</button>
+            <button type="button" data-value="15">15 s</button>
+            <button type="button" data-value="30">30 s</button>
+            <button type="button" data-value="60">60 s</button>
+          </div>
+        </section>
+        <label class="field" id="start-field" hidden>
+          <span class="field-title">Começar em (s)</span>
+          <input id="start" type="number" min="0" step="0.5" placeholder="0">
+        </label>
+        <section class="field" id="count-field">
+          <span class="field-title">Quantidade</span>
+          <div class="segmented compact" data-key="count">
+            <button type="button" data-value="1">1</button>
+            <button type="button" data-value="2">2</button>
+            <button type="button" data-value="4">4</button>
+          </div>
+        </section>
+      </div>
+
+      <details class="advanced">
+        <summary>Avançado</summary>
+        <label class="field">
+          <span class="field-title">Seed</span>
+          <input id="seed" type="number" min="0" placeholder="aleatória">
+        </label>
+        <label class="field">
+          <span class="field-title">O que evitar (prompt negativo)</span>
+          <input id="negative" type="text" placeholder="ex.: texto, marca d'água, pessoas ao fundo">
+        </label>
+      </details>
+      </div>
+
+      <div class="panel-foot">
+        <p id="error" class="error" role="alert" hidden></p>
+        <button id="submit" class="generate" type="submit">Gerar vídeo</button>
+      </div>
+    </form>
+
+    <section class="gallery-wrap">
+      <div class="gallery-head">
+        <h2 class="gallery-title">Suas criações</h2>
+        <div class="filters" data-key="filter">
+          <button type="button" data-value="all">Tudo</button>
+          <button type="button" data-value="video">Vídeos</button>
+          <button type="button" data-value="image">Imagens</button>
+        </div>
+      </div>
+      <p id="gallery-note" class="note"></p>
+      <div id="gallery" class="gallery"></div>
+      <p id="empty" class="empty" hidden>Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo.</p>
+    </section>
+  </main>
+
+  <dialog id="gpu" class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <h2 id="gpu-title">GPU</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Fechar">×</button>
+      </div>
+
+      <section id="gpu-off" class="dialog-section">
+        <p class="lead">Os vídeos são gerados numa GPU gratuita (do Kaggle ou do Lightning AI), que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <ol class="steps">
+          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU</b> (Kaggle) ou em <b>Ligar GPU (Lightning)</b> (placa maior, para a qualidade Ultra).</li>
+          <li>Espere esta página conectar sozinha: uns 5 minutos, ou bem mais quando o Kaggle está cheio e deixa a máquina numa fila.</li>
+        </ol>
+        <details id="manual" class="manual">
+          <summary>Ligar pelo site do Kaggle</summary>
+          <div class="manual-body">
+          <ol class="steps">
+            <li>Abra o seu notebook <b>Wan Studio</b> no Kaggle.</li>
+            <li>Clique em <b>Run All</b> e espere uns 5 minutos.</li>
+            <li id="step-paired">Pronto: esta página conecta sozinha quando a GPU ligar.</li>
+            <li id="step-code">Copie o <b>código de conexão</b> que aparece no notebook e cole abaixo. Só é preciso na primeira vez neste navegador.</li>
+          </ol>
+          <a id="open-notebook" class="generate as-link" target="_blank" rel="noopener" hidden>Abrir meu notebook no Kaggle</a>
+          <label class="field">
+            <span class="field-title">Código de conexão</span>
+            <span class="inline">
+              <input id="connect-code" type="text" placeholder="Cole aqui o código ou o link" autocomplete="off" spellcheck="false">
+              <button type="button" id="connect-go" class="ghost">Conectar</button>
+            </span>
+          </label>
+          <p id="connect-error" class="error" hidden>Código inválido. Copie de novo a linha inteira que o notebook mostrou.</p>
+          <label class="field">
+            <span class="field-title">Link do seu notebook (opcional)</span>
+            <input id="notebook-url" type="url" placeholder="https://www.kaggle.com/code/…" autocomplete="off" spellcheck="false">
+          </label>
+          </div>
+        </details>
+      </section>
+
+      <section id="gpu-on" class="dialog-section" hidden>
+        <dl id="gpu-facts" class="facts"></dl>
+        <p id="idle-note" class="note" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" id="keep-alive" class="ghost" hidden>Manter ligada</button>
+          <button type="button" id="shutdown" class="ghost danger">Desligar GPU</button>
+        </div>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="viewer" class="dialog viewer">
+    <div class="viewer-body">
+      <div id="viewer-media" class="viewer-media"></div>
+      <div class="viewer-side">
+        <div class="dialog-head">
+          <h2>Detalhes</h2>
+          <button type="button" class="icon-btn" data-close aria-label="Fechar">×</button>
+        </div>
+        <p id="viewer-prompt" class="viewer-prompt"></p>
+        <p id="viewer-final" class="note" hidden></p>
+        <p id="viewer-meta" class="card-meta"></p>
+        <div id="viewer-actions" class="card-actions"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

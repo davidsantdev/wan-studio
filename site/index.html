@@ -1,0 +1,1879 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0c0d">
+  <title>Wan Studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0c0d'/%3E%3Crect x='9' y='9' width='14' height='14' rx='3' fill='%23c8f31d' transform='rotate(45 16 16)'/%3E%3C/svg%3E">
+  <style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0c0d;
+  --panel: #131516;
+  --raised: #1b1e20;
+  --line: #2a2e31;
+  --text: #f1f3f2;
+  --muted: #8d9499;
+  --accent: #c8f31d;
+  --accent-ink: #10130a;
+  --danger: #ff6b5e;
+  --warn: #ffc44d;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- topo ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 24px;
+  background: rgba(11, 12, 13, .92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .14em; white-space: nowrap; }
+.brand-mark { width: 14px; height: 14px; border-radius: 4px; background: var(--accent); transform: rotate(45deg); }
+
+.status {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; padding: 7px 14px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel); color: var(--muted);
+  font-size: 13px; text-align: left;
+}
+.status::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status[data-state="ok"] { color: var(--text); }
+.status[data-state="ok"]::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.status[data-state="warn"]::before { background: var(--warn); }
+.status[data-state="down"] { color: var(--text); border-color: #4a3a38; }
+.status[data-state="down"]::before { background: var(--danger); }
+.status-action { color: var(--accent); font-weight: 700; }
+
+/* ---- estrutura ---- */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px;
+  align-items: start;
+}
+
+/* O painel acompanha a rolagem da galeria; so o miolo rola, o botao de gerar fica a vista. */
+.panel {
+  position: sticky; top: 84px;
+  display: flex; flex-direction: column;
+  min-width: 0; max-height: calc(100vh - 108px);
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.panel-scroll { display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 18px; overflow-y: auto; scrollbar-width: thin; }
+.panel-foot { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 18px; border-top: 1px solid var(--line); background: var(--panel); }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg); border-radius: var(--radius); }
+.tab { flex: 1 1 auto; padding: 9px 10px; border: 0; border-radius: 9px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.tab[aria-selected="true"] { background: var(--raised); color: var(--text); }
+.tab:disabled { opacity: .4; }
+
+.note { margin: 0; color: var(--muted); font-size: 13px; }
+.note.warn { padding: 9px 12px; border: 1px solid #4a4128; border-radius: 10px; background: #1d1a10; color: var(--warn); }
+
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; }
+.field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.field-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* Troca de pessoa: cinco duracoes nao cabem em meia linha. */
+.row:has([data-key="length"]:not([hidden])) { grid-template-columns: 1fr; }
+.inline { display: flex; gap: 8px; }
+.inline input { flex: 1; min-width: 0; }
+
+textarea, input[type="number"], input[type="text"], input[type="url"] {
+  width: 100%;
+  padding: 11px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+textarea { resize: vertical; min-height: 96px; }
+textarea::placeholder, input::placeholder { color: #5d6468; }
+
+.link { padding: 2px 0; border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 600; }
+.link:disabled { color: var(--muted); }
+
+/* ---- imagens de entrada ---- */
+.frames { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
+.drop {
+  position: relative;
+  display: grid; place-items: center;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+.drop.over { border-color: var(--accent); color: var(--text); }
+.drop-label { display: flex; flex-direction: column; gap: 2px; padding: 8px; font-weight: 600; }
+.drop-label small { font-weight: 400; font-size: 12px; }
+.drop img, .drop video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.drop-clear {
+  position: absolute; top: 6px; right: 6px;
+  width: 26px; height: 26px;
+  border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .7);
+  font-size: 16px; line-height: 1;
+}
+
+/* ---- presets ---- */
+.subtabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); }
+.subtabs button {
+  display: flex; align-items: baseline; gap: 6px;
+  min-width: 0; margin-bottom: -1px; padding: 0 0 8px;
+  border: 0; border-bottom: 2px solid transparent;
+  background: none; color: var(--muted);
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+}
+.subtabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.pick { min-width: 0; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-weight: 600; letter-spacing: 0; text-transform: none; }
+
+.cameras { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 318px; overflow-y: auto; padding: 2px 4px 2px 2px; scrollbar-width: thin; }
+.camera {
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 0; padding: 6px 6px 8px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--raised);
+  font-size: 11.5px; font-weight: 600; text-align: center; line-height: 1.2;
+}
+.camera[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+.thumb { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 6px; background: #000; perspective: 140px; }
+.thumb .scene { position: absolute; inset: 0; }
+.thumb .bg {
+  position: absolute; inset: -35%;
+  background:
+    linear-gradient(to top, #1d2a16 0 40%, transparent 40%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .1) 0 2px, transparent 2px 16px),
+    linear-gradient(to top, #3a4a52, #10181c);
+}
+.thumb .subj {
+  position: absolute; left: 50%; bottom: 22%;
+  width: 20%; aspect-ratio: 1 / 1.6; margin-left: -10%;
+  border-radius: 45% 45% 14% 14%;
+  background: var(--accent);
+  transform-origin: 50% 100%;
+}
+.thumb-icon {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; padding: 4px;
+  border-radius: 50%; background: rgba(0, 0, 0, .6);
+  fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round;
+}
+.thumb-icon.flip { transform: scaleX(-1); }
+.camera[aria-pressed="true"] .thumb-icon { stroke: var(--accent); }
+.thumb[data-anim="fisheye"]::after, .thumb[data-anim="through"]::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle, transparent 45%, #000 78%);
+}
+
+/* A miniatura so anima sob o cursor ou quando escolhida. */
+:is(.camera:hover, .camera[aria-pressed="true"]) .thumb .scene {
+  animation: var(--scene-anim, none) var(--dur, 2.4s) var(--ease, ease-in-out) infinite var(--dir, alternate);
+}
+:is(.camera:hover, .camera[aria-pressed="true"]) .thumb .bg {
+  animation: var(--bg-anim, none) var(--dur, 2.4s) var(--ease, ease-in-out) infinite var(--dir, alternate);
+}
+:is(.camera:hover, .camera[aria-pressed="true"]) .thumb .subj {
+  animation: var(--subj-anim, none) var(--dur, 2.4s) var(--ease, ease-in-out) infinite var(--dir, alternate);
+}
+
+.thumb[data-anim="zoom-in"] { --scene-anim: cam-zoom; }
+.thumb[data-anim="zoom-out"] { --scene-anim: cam-zoom; --dir: alternate-reverse; }
+.thumb[data-anim="crash"] { --scene-anim: cam-crash; --dur: 1.8s; --dir: normal; }
+.thumb[data-anim="crash-out"] { --scene-anim: cam-crash; --dur: 1.8s; --dir: reverse; }
+.thumb[data-anim="pan-left"] { --scene-anim: cam-pan; }
+.thumb[data-anim="pan-right"] { --scene-anim: cam-pan; --dir: alternate-reverse; }
+.thumb[data-anim="tilt-up"] { --scene-anim: cam-tilt; }
+.thumb[data-anim="tilt-down"] { --scene-anim: cam-tilt; --dir: alternate-reverse; }
+.thumb[data-anim="truck-left"] { --bg-anim: cam-truck-bg; --subj-anim: cam-truck-subj; }
+.thumb[data-anim="truck-right"] { --bg-anim: cam-truck-bg; --subj-anim: cam-truck-subj; --dir: alternate-reverse; }
+.thumb[data-anim="orbit"] { --bg-anim: cam-orbit-bg; --subj-anim: cam-orbit-subj; }
+.thumb[data-anim="arc"] { --bg-anim: cam-arc-bg; --subj-anim: cam-arc-subj; --dur: 3.2s; }
+.thumb[data-anim="crane-up"] { --scene-anim: cam-crane; }
+.thumb[data-anim="crane-down"] { --scene-anim: cam-crane; --dir: alternate-reverse; }
+.thumb[data-anim="overhead"] { --scene-anim: cam-overhead; --dur: 3.2s; }
+.thumb[data-anim="low-angle"] { --bg-anim: cam-low-bg; --subj-anim: cam-low-subj; }
+.thumb[data-anim="shake"] { --scene-anim: cam-shake; --dur: .5s; }
+.thumb[data-anim="snorricam"] { --bg-anim: cam-sway; --dur: .9s; }
+.thumb[data-anim="fpv"] { --scene-anim: cam-fpv; }
+.thumb[data-anim="aerial"] { --scene-anim: cam-aerial; --dur: 3.2s; }
+.thumb[data-anim="through"] { --scene-anim: cam-through; --dir: normal; }
+.thumb[data-anim="vertigo"] { --bg-anim: cam-vertigo; }
+.thumb[data-anim="bullet"] { --bg-anim: cam-orbit-bg; --dur: .9s; }
+.thumb[data-anim="whip"] { --scene-anim: cam-whip; --dur: 1.6s; --dir: normal; --ease: ease-out; }
+.thumb[data-anim="roll"] { --scene-anim: cam-roll; }
+.thumb[data-anim="spin"] { --scene-anim: cam-spin; --dur: 2.8s; --dir: normal; --ease: linear; }
+.thumb[data-anim="macro"] { --scene-anim: cam-macro; --dur: 3.2s; }
+.thumb[data-anim="focus"] { --bg-anim: cam-focus-bg; --subj-anim: cam-focus-subj; }
+.thumb[data-anim="fisheye"] { --scene-anim: cam-fisheye; }
+.thumb[data-anim="slow"] { --subj-anim: cam-slow; --dur: 4.5s; }
+.thumb[data-anim="timelapse"] { --bg-anim: cam-timelapse; --dur: 1.3s; --ease: linear; }
+
+@keyframes cam-zoom { to { transform: scale(1.6); } }
+@keyframes cam-crash { 0%, 20% { transform: scale(1); } 55%, 100% { transform: scale(2.4); } }
+@keyframes cam-pan { from { transform: translateX(-13%); } to { transform: translateX(13%); } }
+@keyframes cam-tilt { from { transform: translateY(-13%); } to { transform: translateY(13%); } }
+@keyframes cam-truck-bg { from { transform: translateX(-14%); } to { transform: translateX(14%); } }
+@keyframes cam-truck-subj { from { transform: translateX(-45%); } to { transform: translateX(45%); } }
+@keyframes cam-orbit-bg { from { transform: translateX(-18%); } to { transform: translateX(18%); } }
+@keyframes cam-orbit-subj { from { transform: rotateY(-40deg); } to { transform: rotateY(40deg); } }
+@keyframes cam-arc-bg { from { transform: translateX(-8%); } to { transform: translateX(8%); } }
+@keyframes cam-arc-subj { from { transform: rotateY(-20deg); } to { transform: rotateY(20deg); } }
+@keyframes cam-crane { from { transform: translateY(-12%); } to { transform: translateY(14%) scale(.82); } }
+@keyframes cam-overhead { from { transform: scale(1.5) rotate(0); } to { transform: scale(1.5) rotate(40deg); } }
+@keyframes cam-low-bg { to { transform: translateY(10%); } }
+@keyframes cam-low-subj { to { transform: scale(1.15, 1.4); } }
+@keyframes cam-shake {
+  0% { transform: translate(-2%, 1%); }
+  50% { transform: translate(2%, -2%) rotate(.6deg); }
+  100% { transform: translate(-1%, 2%); }
+}
+@keyframes cam-sway { from { transform: translate(-6%, 3%) rotate(-5deg); } to { transform: translate(6%, -3%) rotate(5deg); } }
+@keyframes cam-fpv { from { transform: rotate(-7deg) scale(1.1); } to { transform: rotate(7deg) scale(1.9); } }
+@keyframes cam-aerial { from { transform: translateY(8%) scale(1.15); } to { transform: translateY(-8%) scale(1.15); } }
+@keyframes cam-through { from { transform: scale(.7); } to { transform: scale(2.6); } }
+@keyframes cam-vertigo { to { transform: scale(2); } }
+@keyframes cam-whip {
+  0% { transform: translateX(-45%); filter: blur(3px); }
+  35%, 100% { transform: translateX(0); filter: blur(0); }
+}
+@keyframes cam-roll { to { transform: rotate(16deg) scale(1.25); } }
+@keyframes cam-spin { from { transform: scale(1.6) rotate(0); } to { transform: scale(1.6) rotate(360deg); } }
+@keyframes cam-macro { from { transform: scale(2.3) translateX(-4%); } to { transform: scale(2.3) translateX(4%); } }
+@keyframes cam-focus-bg { from { filter: blur(3px); } to { filter: blur(0); } }
+@keyframes cam-focus-subj { from { filter: blur(0); } to { filter: blur(2.5px); } }
+@keyframes cam-fisheye { to { transform: scale(1.3); } }
+@keyframes cam-slow { to { transform: translateY(-40%); } }
+@keyframes cam-timelapse {
+  from { transform: translateX(-10%); filter: brightness(.55); }
+  to { transform: translateX(10%); filter: brightness(1.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thumb .scene, .thumb .bg, .thumb .subj { animation: none !important; }
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); }
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+
+/* ---- opcoes ---- */
+.segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+.segmented button { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); font-weight: 600; }
+.segmented.compact button { padding: 8px 4px; white-space: nowrap; }
+.segmented small { color: var(--muted); font-weight: 400; }
+.segmented button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.segmented button:disabled { opacity: .35; }
+
+.fixed-choice { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--raised); color: var(--accent); font-weight: 600; text-align: center; }
+.fixed-choice small { color: var(--muted); font-weight: 400; }
+.check { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 13px; }
+.check input { flex: none; accent-color: var(--accent); margin-top: 3px; }
+
+.advanced { border-top: 1px solid var(--line); padding-top: 12px; }
+.advanced summary { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.advanced[open] summary { margin-bottom: 12px; }
+.advanced .field + .field { margin-top: 12px; }
+
+.error { margin: 0; color: var(--danger); overflow-wrap: anywhere; }
+.generate {
+  width: 100%; padding: 14px;
+  border: 0; border-radius: var(--radius);
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 15px; font-weight: 800; letter-spacing: .02em;
+}
+.generate:disabled { opacity: .5; }
+.generate.as-link { display: block; text-align: center; text-decoration: none; }
+
+/* ---- galeria ---- */
+.gallery-wrap { min-width: 0; }
+.gallery-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 6px; }
+.gallery-title { margin: 0; font-size: 18px; }
+.filters { display: flex; gap: 4px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; }
+.filters button { padding: 5px 12px; border: 0; border-radius: 999px; background: none; color: var(--muted); font-size: 13px; }
+.filters button[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+#gallery-note { margin-bottom: 16px; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.empty { max-width: 46ch; color: var(--muted); }
+
+.card { overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.card-media { position: relative; display: grid; place-items: center; width: 100%; padding: 0; border: 0; background: #000; color: inherit; }
+.card-media.open { cursor: zoom-in; }
+.card-media video, .card-media img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.badge { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .65); font-size: 11px; font-weight: 600; }
+.card-wait { width: 76%; text-align: center; color: var(--muted); }
+.card-wait.failed { color: var(--danger); overflow-wrap: anywhere; }
+.bar { height: 4px; margin-top: 10px; overflow: hidden; border-radius: 2px; background: var(--line); }
+.bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.bar.busy i { width: 35%; animation: bar-slide 1.4s ease-in-out infinite alternate; }
+@keyframes bar-slide { from { margin-left: 0; } to { margin-left: 65%; } }
+.card-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.card-prompt { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-meta { margin: 0; color: var(--muted); font-size: 12px; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-actions > * { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; text-decoration: none; }
+.card-actions .danger { margin-left: auto; color: var(--danger); }
+
+/* ---- dialogos ---- */
+.dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); }
+.dialog::backdrop { background: rgba(0, 0, 0, .7); }
+.dialog-body { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.dialog-section { display: flex; flex-direction: column; gap: 14px; }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dialog-head h2 { margin: 0; font-size: 18px; }
+.icon-btn { width: 30px; height: 30px; border: 0; border-radius: 50%; background: var(--raised); font-size: 18px; line-height: 1; }
+.lead { margin: 0; color: var(--muted); }
+.steps { margin: 0; padding-left: 20px; }
+.steps li + li { margin-top: 6px; }
+.manual { border-top: 1px solid var(--line); padding-top: 12px; }
+.manual summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+.manual-body { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ghost { padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: none; white-space: nowrap; }
+.ghost.danger { margin-left: auto; color: var(--danger); }
+
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.facts .yes { color: var(--accent); }
+.facts .no { color: var(--muted); }
+
+.viewer { width: min(1100px, calc(100vw - 32px)); }
+.viewer-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+.viewer-media { display: grid; place-items: center; min-height: 240px; background: #000; }
+.viewer-media video, .viewer-media img { display: block; max-width: 100%; max-height: calc(100vh - 34px); }
+.viewer-side { display: flex; flex-direction: column; gap: 12px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 34px); }
+.viewer-prompt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .topbar { padding: 10px 16px; }
+  /* Uma coluna: o painel volta ao fluxo e o botao de gerar gruda no pe da tela. */
+  .panel { position: static; max-height: none; overflow: visible; }
+  .panel-scroll { overflow: visible; }
+  .panel-foot { position: sticky; bottom: 0; border-radius: 0 0 16px 16px; }
+  .viewer-body { grid-template-columns: 1fr; }
+  .viewer-media video, .viewer-media img { max-height: 60vh; }
+  .viewer-side { max-height: none; }
+}
+@media (max-width: 420px) {
+  .tab { flex-basis: 40%; }
+  .cameras { grid-template-columns: repeat(3, 1fr); }
+  .brand { letter-spacing: .08em; }
+}
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark"></span>WAN STUDIO</div>
+    <button id="status" type="button" class="status" data-state="loading">Conectando…</button>
+  </header>
+
+  <main class="layout">
+    <form id="form" class="panel" autocomplete="off">
+      <div class="panel-scroll">
+      <div class="tabs" data-key="mode" role="tablist">
+        <button type="button" class="tab" role="tab" data-value="t2v">Texto → Vídeo</button>
+        <button type="button" class="tab" role="tab" data-value="i2v">Imagem → Vídeo</button>
+        <button type="button" class="tab" role="tab" data-value="flf">Início + Fim</button>
+        <button type="button" class="tab" role="tab" data-value="img">Imagem</button>
+        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
+      </div>
+      <p id="mode-note" class="note warn" hidden></p>
+
+      <div id="frames" class="frames" hidden>
+        <label class="drop" data-frame="start_image">
+          <input type="file" accept="image/*" hidden>
+          <span class="drop-label"><span class="drop-title">Frame inicial</span><small>clique ou arraste uma imagem</small></span>
+          <img alt="Imagem escolhida" hidden>
+          <button type="button" class="drop-clear" hidden aria-label="Remover imagem">×</button>
+        </label>
+        <label class="drop" data-frame="end_image" hidden>
+          <input type="file" accept="image/*" hidden>
+          <span class="drop-label">Frame final<small>clique ou arraste uma imagem</small></span>
+          <img alt="Frame final escolhido" hidden>
+          <button type="button" class="drop-clear" hidden aria-label="Remover imagem">×</button>
+        </label>
+        <label class="drop" data-frame="video" hidden>
+          <input type="file" accept="video/*" hidden>
+          <span class="drop-label"><span class="drop-title">Vídeo</span><small>clique ou arraste um vídeo (até 100 MB)</small></span>
+          <video muted loop playsinline hidden></video>
+          <button type="button" class="drop-clear" hidden aria-label="Remover vídeo">×</button>
+        </label>
+      </div>
+      <div id="swap-options" class="field" hidden>
+        <p class="note">A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
+        <label class="check">
+          <input type="checkbox" id="replace" checked>
+          <span>Manter o cenário do vídeo (desmarque para a pessoa só copiar os movimentos, no cenário da própria imagem)</span>
+        </label>
+        <span class="field-title">Qualidade</span>
+        <div class="segmented" data-key="quality">
+          <button type="button" data-value="rapida">Rápida<small>menor, ampliada</small></button>
+          <button type="button" data-value="boa">Boa<small>480p</small></button>
+          <button type="button" data-value="maxima">Máxima<small>576p</small></button>
+          <button type="button" data-value="ultra" hidden>Ultra<small>720p direto</small></button>
+        </div>
+        <label class="check" id="hd-row" hidden>
+          <input type="checkbox" id="hd">
+          <span>Alta definição: restaurar os detalhes e entregar em 720p (mais nítido; leva mais tempo)</span>
+        </label>
+        <label class="check" id="fluid-row" hidden>
+          <input type="checkbox" id="fluid">
+          <span>Movimento fluido: 32 quadros por segundo em vez de 16 (os quadros a mais são calculados em segundos)</span>
+        </label>
+        <p id="swap-estimate" class="note"></p>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <label class="field-title" for="prompt">Prompt</label>
+          <button type="button" id="enhance" class="link" hidden>Melhorar com IA</button>
+        </div>
+        <textarea id="prompt" rows="4" placeholder="Descreva a cena: quem aparece, onde, o que acontece, a luz…"></textarea>
+        <label id="auto-row" class="check" hidden>
+          <input type="checkbox" id="auto-enhance" checked>
+          <span>Traduzir para inglês e detalhar o prompt ao gerar</span>
+        </label>
+      </div>
+
+      <section class="field" id="presets-field">
+        <div class="subtabs" data-key="tab" role="tablist">
+          <button type="button" role="tab" data-value="camera">Câmera<span class="pick" data-pick="camera"></span></button>
+          <button type="button" role="tab" data-value="effect">Efeitos<span class="pick" data-pick="effect"></span></button>
+          <button type="button" role="tab" data-value="style">Estilo<span class="pick" data-pick="style"></span></button>
+        </div>
+        <div id="cameras" class="cameras" data-key="camera"></div>
+        <div id="effects" class="chips" data-key="effect" hidden></div>
+        <div id="styles" class="chips" data-key="style" hidden></div>
+      </section>
+
+      <section class="field">
+        <span class="field-title">Modelo</span>
+        <p id="swap-model" class="fixed-choice" hidden>Wan 2.2 Animate<small>troca de pessoa · 16 fps</small></p>
+        <div class="segmented" data-key="model">
+          <button type="button" data-value="5b">Wan 2.2 5B<small>rápido · 24 fps</small></button>
+          <button type="button" data-value="14b">Wan 2.2 14B<small>qualidade · 16 fps</small></button>
+        </div>
+        <label id="fast-row" class="check">
+          <input type="checkbox" id="fast" checked>
+          <span id="fast-label">Turbo</span>
+        </label>
+      </section>
+
+      <div class="row">
+        <section class="field" id="aspect-field">
+          <span class="field-title">Proporção</span>
+          <div class="segmented compact" data-key="aspect">
+            <button type="button" data-value="16:9">16:9</button>
+            <button type="button" data-value="9:16">9:16</button>
+            <button type="button" data-value="1:1">1:1</button>
+          </div>
+        </section>
+        <section class="field" id="resolution-field">
+          <span class="field-title">Resolução</span>
+          <div class="segmented compact" data-key="resolution">
+            <button type="button" data-value="480p">480p</button>
+            <button type="button" data-value="720p">720p</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="row">
+        <section class="field" id="duration-field">
+          <span class="field-title">Duração</span>
+          <div class="segmented compact" data-key="duration">
+            <button type="button" data-value="3">3 s</button>
+            <button type="button" data-value="5">5 s</button>
+          </div>
+          <div class="segmented compact" data-key="length" hidden>
+            <button type="button" data-value="5">5 s</button>
+            <button type="button" data-value="10">10 s</button>
+            <button type="button" data-value="15">15 s</button>
+            <button type="button" data-value="30">30 s</button>
+            <button type="button" data-value="60">60 s</button>
+          </div>
+        </section>
+        <label class="field" id="start-field" hidden>
+          <span class="field-title">Começar em (s)</span>
+          <input id="start" type="number" min="0" step="0.5" placeholder="0">
+        </label>
+        <section class="field" id="count-field">
+          <span class="field-title">Quantidade</span>
+          <div class="segmented compact" data-key="count">
+            <button type="button" data-value="1">1</button>
+            <button type="button" data-value="2">2</button>
+            <button type="button" data-value="4">4</button>
+          </div>
+        </section>
+      </div>
+
+      <details class="advanced">
+        <summary>Avançado</summary>
+        <label class="field">
+          <span class="field-title">Seed</span>
+          <input id="seed" type="number" min="0" placeholder="aleatória">
+        </label>
+        <label class="field">
+          <span class="field-title">O que evitar (prompt negativo)</span>
+          <input id="negative" type="text" placeholder="ex.: texto, marca d'água, pessoas ao fundo">
+        </label>
+      </details>
+      </div>
+
+      <div class="panel-foot">
+        <p id="error" class="error" role="alert" hidden></p>
+        <button id="submit" class="generate" type="submit">Gerar vídeo</button>
+      </div>
+    </form>
+
+    <section class="gallery-wrap">
+      <div class="gallery-head">
+        <h2 class="gallery-title">Suas criações</h2>
+        <div class="filters" data-key="filter">
+          <button type="button" data-value="all">Tudo</button>
+          <button type="button" data-value="video">Vídeos</button>
+          <button type="button" data-value="image">Imagens</button>
+        </div>
+      </div>
+      <p id="gallery-note" class="note"></p>
+      <div id="gallery" class="gallery"></div>
+      <p id="empty" class="empty" hidden>Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo.</p>
+    </section>
+  </main>
+
+  <dialog id="gpu" class="dialog">
+    <div class="dialog-body">
+      <div class="dialog-head">
+        <h2 id="gpu-title">GPU</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Fechar">×</button>
+      </div>
+
+      <section id="gpu-off" class="dialog-section">
+        <p class="lead">Os vídeos são gerados numa GPU gratuita (do Kaggle ou do Lightning AI), que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <ol class="steps">
+          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU</b> (Kaggle) ou em <b>Ligar GPU (Lightning)</b> (placa maior, para a qualidade Ultra).</li>
+          <li>Espere esta página conectar sozinha: uns 5 minutos, ou bem mais quando o Kaggle está cheio e deixa a máquina numa fila.</li>
+        </ol>
+        <details id="manual" class="manual">
+          <summary>Ligar pelo site do Kaggle</summary>
+          <div class="manual-body">
+          <ol class="steps">
+            <li>Abra o seu notebook <b>Wan Studio</b> no Kaggle.</li>
+            <li>Clique em <b>Run All</b> e espere uns 5 minutos.</li>
+            <li id="step-paired">Pronto: esta página conecta sozinha quando a GPU ligar.</li>
+            <li id="step-code">Copie o <b>código de conexão</b> que aparece no notebook e cole abaixo. Só é preciso na primeira vez neste navegador.</li>
+          </ol>
+          <a id="open-notebook" class="generate as-link" target="_blank" rel="noopener" hidden>Abrir meu notebook no Kaggle</a>
+          <label class="field">
+            <span class="field-title">Código de conexão</span>
+            <span class="inline">
+              <input id="connect-code" type="text" placeholder="Cole aqui o código ou o link" autocomplete="off" spellcheck="false">
+              <button type="button" id="connect-go" class="ghost">Conectar</button>
+            </span>
+          </label>
+          <p id="connect-error" class="error" hidden>Código inválido. Copie de novo a linha inteira que o notebook mostrou.</p>
+          <label class="field">
+            <span class="field-title">Link do seu notebook (opcional)</span>
+            <input id="notebook-url" type="url" placeholder="https://www.kaggle.com/code/…" autocomplete="off" spellcheck="false">
+          </label>
+          </div>
+        </details>
+      </section>
+
+      <section id="gpu-on" class="dialog-section" hidden>
+        <dl id="gpu-facts" class="facts"></dl>
+        <p id="idle-note" class="note" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" id="keep-alive" class="ghost" hidden>Manter ligada</button>
+          <button type="button" id="shutdown" class="ghost danger">Desligar GPU</button>
+        </div>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="viewer" class="dialog viewer">
+    <div class="viewer-body">
+      <div id="viewer-media" class="viewer-media"></div>
+      <div class="viewer-side">
+        <div class="dialog-head">
+          <h2>Detalhes</h2>
+          <button type="button" class="icon-btn" data-close aria-label="Fechar">×</button>
+        </div>
+        <p id="viewer-prompt" class="viewer-prompt"></p>
+        <p id="viewer-final" class="note" hidden></p>
+        <p id="viewer-meta" class="card-meta"></p>
+        <div id="viewer-actions" class="card-actions"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+window.WAN_SITE = {"ntfy": "https://ntfy.sh"};
+window.WAN_PRESETS = {"cameras": [{"id": "none", "name": "Livre", "anim": "none"}, {"id": "static", "name": "Câmera fixa", "anim": "static"}, {"id": "dolly_in", "name": "Dolly In", "anim": "zoom-in"}, {"id": "dolly_out", "name": "Dolly Out", "anim": "zoom-out"}, {"id": "crash_zoom_in", "name": "Crash Zoom In", "anim": "crash"}, {"id": "crash_zoom_out", "name": "Crash Zoom Out", "anim": "crash-out"}, {"id": "pan_left", "name": "Pan esquerda", "anim": "pan-left"}, {"id": "pan_right", "name": "Pan direita", "anim": "pan-right"}, {"id": "tilt_up", "name": "Tilt para cima", "anim": "tilt-up"}, {"id": "tilt_down", "name": "Tilt para baixo", "anim": "tilt-down"}, {"id": "truck_left", "name": "Travelling esq.", "anim": "truck-left"}, {"id": "truck_right", "name": "Travelling dir.", "anim": "truck-right"}, {"id": "orbit", "name": "Órbita 360", "anim": "orbit"}, {"id": "arc", "name": "Arco lento", "anim": "arc"}, {"id": "crane_up", "name": "Grua subindo", "anim": "crane-up"}, {"id": "crane_down", "name": "Grua descendo", "anim": "crane-down"}, {"id": "overhead", "name": "Vista de cima", "anim": "overhead"}, {"id": "low_angle", "name": "Contra-plongée", "anim": "low-angle"}, {"id": "tracking", "name": "Tracking", "anim": "truck-right"}, {"id": "lead", "name": "De frente", "anim": "zoom-out"}, {"id": "handheld", "name": "Câmera na mão", "anim": "shake"}, {"id": "pov", "name": "POV", "anim": "shake"}, {"id": "snorricam", "name": "Snorricam", "anim": "snorricam"}, {"id": "fpv", "name": "Drone FPV", "anim": "fpv"}, {"id": "aerial", "name": "Drone aéreo", "anim": "aerial"}, {"id": "through", "name": "Atravessando", "anim": "through"}, {"id": "dolly_zoom", "name": "Dolly Zoom", "anim": "vertigo"}, {"id": "bullet_time", "name": "Bullet Time", "anim": "bullet"}, {"id": "whip_pan", "name": "Whip Pan", "anim": "whip"}, {"id": "dutch", "name": "Dutch angle", "anim": "roll"}, {"id": "spin", "name": "Giro 360", "anim": "spin"}, {"id": "macro", "name": "Super close", "anim": "macro"}, {"id": "rack_focus", "name": "Troca de foco", "anim": "focus"}, {"id": "fisheye", "name": "Olho de peixe", "anim": "fisheye"}, {"id": "slow_motion", "name": "Câmera lenta", "anim": "slow"}, {"id": "timelapse", "name": "Timelapse", "anim": "timelapse"}, {"id": "hyperlapse", "name": "Hyperlapse", "anim": "fpv"}], "effects": [{"id": "none", "name": "Nenhum"}, {"id": "explosion", "name": "Explosão"}, {"id": "fire", "name": "Em chamas"}, {"id": "disintegrate", "name": "Desintegrar"}, {"id": "levitate", "name": "Levitação"}, {"id": "freeze", "name": "Congelar"}, {"id": "lightning", "name": "Raios"}, {"id": "flood", "name": "Inundação"}, {"id": "melt", "name": "Derreter"}, {"id": "glow", "name": "Brilho"}, {"id": "wings", "name": "Asas"}, {"id": "bloom", "name": "Florescer"}, {"id": "smoke", "name": "Fumaça"}, {"id": "rain", "name": "Chuva"}, {"id": "snow", "name": "Neve"}, {"id": "wind", "name": "Vento forte"}, {"id": "metal", "name": "Virar metal"}, {"id": "hologram", "name": "Holograma"}, {"id": "glitch", "name": "Glitch"}, {"id": "clones", "name": "Clones"}, {"id": "portal", "name": "Portal"}, {"id": "confetti", "name": "Confete"}], "styles": [{"id": "none", "name": "Nenhum"}, {"id": "cinematic", "name": "Cinemático"}, {"id": "commercial", "name": "Comercial"}, {"id": "documentary", "name": "Documentário"}, {"id": "golden_hour", "name": "Golden hour"}, {"id": "noir", "name": "Noir"}, {"id": "cyberpunk", "name": "Cyberpunk"}, {"id": "fantasy", "name": "Fantasia"}, {"id": "horror", "name": "Terror"}, {"id": "vintage", "name": "Filme antigo"}, {"id": "vhs", "name": "VHS"}, {"id": "anime", "name": "Anime"}, {"id": "3d", "name": "Animação 3D"}, {"id": "claymation", "name": "Massinha"}, {"id": "pixel", "name": "Pixel art"}, {"id": "watercolor", "name": "Aquarela"}, {"id": "oil", "name": "Pintura a óleo"}]};
+</script>
+  <script>
+"use strict";
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+// O site estatico (hospedado ou aberto do disco) define WAN_SITE. Servida pelo servidor da
+// GPU, a pagina fala com a API na mesma origem e nao ha o que conectar.
+const SITE = window.WAN_SITE || null;
+const NTFY = (SITE && SITE.ntfy) || "https://ntfy.sh";
+const FETCH_TIMEOUT = 12000;
+const UPLOAD_TIMEOUT = 120000;
+const VIDEO_UPLOAD_TIMEOUT = 600000;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;   // mesmo teto do servidor e do tunel
+const MAX_STORED_VIDEO = 25 * 1024 * 1024;   // acima disso o video de origem nao e guardado
+const DOWNLOAD_TIMEOUT = 300000;
+const STATUS_EVERY = 10000;
+const MAX_COLLECT_TRIES = 5;
+
+const ACTIVE = ["preparing", "queued", "running"];
+const DEFAULTS = {
+  mode: "t2v", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
+  resolution: "480p", duration: "5", count: "1", tab: "camera", filter: "all",
+  quality: "boa", length: "5",  // troca de pessoa: qualidade e duracao do trecho
+};
+const SET_NAMES = {
+  "5b": "5B", animate: "Animate · trocar pessoa", "14b_i2v": "14B · imagem → vídeo", "14b_t2v": "14B · texto → vídeo",
+};
+const MODEL_NAMES = { "5b": "5B", "14b": "14B", animate: "Animate" };
+const ENHANCER_TEXT = {
+  ready: "pronto", waiting: "baixando o modelo", loading: "carregando", off: "indisponível", error: "falhou",
+  sleeping: "em pausa enquanto a segunda GPU gera vídeo",
+};
+const QUALITY_NAMES = { rapida: "rápida", boa: "boa", maxima: "máxima", ultra: "ultra" };
+// Troca de pessoa, para a estimativa de tempo. Por qualidade: segundos por pedaco numa T4
+// (analise do video + passos + gravacao). "boa" e "rapida" foram medidas na GPU do Kaggle em
+// 12/10/2026 (10 s em 26,6 e 11,6 min, dois pedacos de 77 quadros); a "maxima" e a medida
+// antiga do pedaco de 49 quadros; a "ultra" nao roda na T4, e o numero dela e uma conta.
+const SWAP_CHUNK_SECONDS = { rapida: 350, boa: 800, maxima: 900, ultra: 2800 };
+const SWAP_FPS = 16;  // todos os quadros sao gerados
+// A alta definicao (restauracao de cada pedaco) leva isto a mais por pedaco de 49 quadros:
+// medido em 12/10/2026 num video em pe (720x1248), uns 480 s com a outra GPU ocupada; num
+// quadrado (720x720), 220 s.
+const SWAP_HD_SECONDS = 400;
+const SWAP_CHUNK = 77, SWAP_OVERLAP = 5;
+const SWAP_CHUNKS = { maxima: 49 };  // quadros por pedaco quando nao sao os 77 de costume
+// A "ultra" so aparece em placas com pelo menos isto de memoria (GB); o servidor confere.
+const ULTRA_MIN_VRAM = 20;
+// Quantas vezes cada placa e mais rapida que a T4 nesta tarefa. Sao estimativas pela ficha
+// tecnica, ainda sem medida: o site avisa disso ao mostrar o tempo. A ordem importa ("L40S"
+// contem "L4").
+const GPU_SPEED = [["B200", 14], ["H200", 10], ["H100", 9], ["RTX PRO 6000", 9], ["A100", 5.5], ["L40S", 5.5],
+                   ["A10G", 2.3], ["L4", 1.9]];
+
+// Icone que indica o movimento com a miniatura parada (tracos 24x24, do conjunto Feather).
+const ICONS = {
+  left: "M19 12H5M12 19l-7-7 7-7",
+  right: "M5 12h14M12 5l7 7-7 7",
+  up: "M12 19V5M5 12l7-7 7 7",
+  down: "M12 5v14M19 12l-7 7-7-7",
+  "zoom-in": "M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0M21 21l-4.35-4.35M11 8v6M8 11h6",
+  "zoom-out": "M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0M21 21l-4.35-4.35M8 11h6",
+  rotate: "M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10",
+  refresh: "M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15",
+  shake: "M22 12h-4l-3 9L9 3l-3 9H2",
+  fast: "M13 17l5-5-5-5M6 17l5-5-5-5",
+  frame: "M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3",
+  focus: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M22 12h-4M6 12H2M12 6V2M12 22v-4",
+  clock: "M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0M12 6v6l4 2",
+  eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+};
+const ANIM_ICON = {
+  static: "frame", "zoom-in": "zoom-in", "zoom-out": "zoom-out", crash: "fast", "crash-out": "fast",
+  "pan-left": "left", "pan-right": "right", "tilt-up": "up", "tilt-down": "down",
+  "truck-left": "left", "truck-right": "right", orbit: "rotate", arc: "rotate", "crane-up": "up",
+  "crane-down": "down", overhead: "down", "low-angle": "up", shake: "shake", snorricam: "shake",
+  fpv: "fast", aerial: "up", through: "zoom-in", vertigo: "focus", bullet: "rotate", whip: "fast",
+  roll: "refresh", spin: "refresh", macro: "zoom-in", focus: "focus", fisheye: "eye", slow: "clock",
+  timelapse: "clock",
+};
+
+function animIcon(anim) {
+  if (!ANIM_ICON[anim]) return null;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", anim === "crash-out" ? "thumb-icon flip" : "thumb-icon");
+  const path = document.createElementNS(svg.namespaceURI, "path");
+  path.setAttribute("d", ICONS[ANIM_ICON[anim]]);
+  svg.append(path);
+  return svg;
+}
+
+function el(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children.filter((child) => child !== null && child !== undefined && child !== ""));
+  return node;
+}
+
+// localStorage pode faltar (janela privada, dados bloqueados): tudo aqui e conveniencia.
+const store = {
+  get(key, fallback = null) {
+    try {
+      const raw = localStorage.getItem("wan-" + key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch { return fallback; }
+  },
+  set(key, value) {
+    try {
+      if (value === null) localStorage.removeItem("wan-" + key);
+      else localStorage.setItem("wan-" + key, JSON.stringify(value));
+    } catch { /* sem armazenamento, segue sem lembrar */ }
+  },
+};
+
+const state = { ...DEFAULTS, ...store.get("settings", {}) };
+// As qualidades da troca de pessoa mudaram em 12/10/2026 (a "rapida" de antes saia com
+// defeito e era a padrao): quem tinha uma escolha guardada volta, uma vez, para a padrao.
+if (store.get("qualities", 1) < 2) {
+  state.quality = DEFAULTS.quality;
+  store.set("qualities", 2);
+}
+const files = { start_image: null, end_image: null, video: null };
+let presets = { cameras: [], effects: [], styles: [] };
+let conn = store.get("conn");        // { url, password } da sessao atual da GPU
+let pairing = store.get("pairing");  // { topic, key }: como achar a sessao sem colar codigo
+let status = null;                   // ultima resposta de /api/status; null = sem resposta
+let failures = 0;
+let submitting = false;
+
+const reachable = () => Boolean(conn) || !SITE;
+const online = () => Boolean(status && status.comfy);
+
+// ---------------------------------------------------------------- conexao
+
+function bytesFromB64(text) {
+  const binary = atob(String(text).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+/** Aceita o codigo puro ou um link que o contenha (…#c=CODIGO). */
+function parseCode(text) {
+  let code = String(text).trim();
+  const inLink = code.match(/[#&?]c=([\w-]+)/);
+  if (inLink) code = inLink[1];
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytesFromB64(code)));
+    return hasSession(data) || (data.t && data.k) ? data : null;
+  } catch { return null; }
+}
+
+const hasSession = (data) => /^https?:\/\//.test(data.u || "");
+
+/** Guarda o que o codigo trouxer: a sessao atual (u, p), o pareamento (t, k) ou os dois.
+ *  O atalho "Ligar GPU" manda so o pareamento e a hora em que ligou (s). */
+function connect(data) {
+  if (data.t && data.k) {
+    pairing = { topic: data.t, key: data.k };
+    store.set("pairing", pairing);
+  }
+  if (hasSession(data)) {
+    conn = { url: data.u.replace(/\/+$/, ""), password: data.p || "" };
+    store.set("conn", conn);
+    failures = 0;
+  }
+  if (data.s) store.set("starting", Number(data.s));
+}
+
+// Segundos em que "a GPU esta ligando" ainda faz sentido. A instalacao leva uns 5 minutos, mas
+// antes dela o Kaggle pode segurar a sessao numa fila: num teste real foram 35.
+const STARTING_WINDOW = 60 * 60;
+
+/** A GPU foi ligada ha pouco pelo atalho e ainda nao apareceu? */
+function starting() {
+  const since = store.get("starting");
+  return Boolean(since) && !online() && Date.now() / 1000 - since < STARTING_WINDOW;
+}
+
+function api(path, options = {}) {
+  const headers = new Headers(options.headers);
+  if (conn && conn.password) headers.set("Authorization", "Basic " + btoa("wan:" + conn.password));
+  const signal = AbortSignal.timeout(options.timeout || FETCH_TIMEOUT);
+  return fetch((conn ? conn.url : "") + path, { ...options, headers, signal });
+}
+
+async function decrypt(message, keyText) {
+  const raw = bytesFromB64(message);
+  const key = await crypto.subtle.importKey("raw", bytesFromB64(keyText), "AES-GCM", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+const DISCOVER_EVERY = 20000;
+let discovering = false;
+let lastDiscover = 0;
+
+/** O notebook anuncia o endereco da sessao, cifrado, num topico que so este navegador conhece. */
+async function discover(force = false) {
+  if (!pairing || discovering || document.hidden) return;
+  if (!force && Date.now() - lastDiscover < DISCOVER_EVERY) return;
+  lastDiscover = Date.now();
+  discovering = true;
+  try {
+    const response = await fetch(`${NTFY}/${pairing.topic}/json?poll=1&since=20m`,
+                                 { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+    const messages = (await response.text()).split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line)).filter((entry) => entry.event === "message");
+    if (!messages.length) return;
+    const data = await decrypt(messages[messages.length - 1].message, pairing.key);
+    if (data.off || !/^https?:\/\//.test(data.u)) return;
+    if (!conn || conn.url !== data.u.replace(/\/+$/, "") || conn.password !== data.p) {
+      connect(data);
+      await refreshStatus();
+      pollJobs();
+    }
+  } catch { /* sem anuncio legivel: continua desligado */ } finally {
+    discovering = false;
+  }
+}
+
+async function refreshStatus() {
+  let next = null;
+  if (reachable()) {
+    try {
+      const response = await api("/api/status");
+      if (response.ok) next = await response.json();
+    } catch { /* tratado abaixo como falha */ }
+  }
+  if (next) {
+    failures = 0;
+    status = next;
+    if (next.comfy) store.set("starting", null);  // chegou: nao esta mais "ligando"
+  } else if (++failures >= 2 || !status) {
+    status = null;  // uma falha isolada nao derruba a tela; duas seguidas sim
+  }
+  renderStatus();
+  refreshForm();
+  if ($("#gpu").open) renderGpu();
+  if (!status && SITE) discover();
+}
+
+function idleLeft() {
+  const idle = status && status.idle;
+  if (!idle || !idle.limit || idle.busy) return null;
+  return idle.limit - idle.seconds;
+}
+
+function renderStatus() {
+  const button = $("#status");
+  let name = "down";
+  let label = SITE ? "GPU desligada" : "Servidor fora do ar";
+  let action = SITE ? "Ligar" : "";
+  if (online()) {
+    name = "ok";
+    label = status.gpu || "GPU ligada";
+    action = "";
+    const left = idleLeft();
+    if (left !== null && left < 600) label += ` · desliga em ${Math.max(1, Math.ceil(left / 60))} min`;
+  } else if (status) {
+    name = "warn";
+    label = "GPU iniciando…";
+    action = "";
+  } else if (SITE && starting()) {
+    name = "warn";
+    label = "GPU ligando…";
+    action = "";
+  }
+  button.dataset.state = name;
+  button.replaceChildren(label, ...(action ? [el("span", { className: "status-action", textContent: action })] : []));
+}
+
+function fact(label, value, className = "") {
+  return [el("dt", { textContent: label }), el("dd", { textContent: value, className })];
+}
+
+function renderGpu() {
+  const on = online();
+  $("#gpu-title").textContent = on ? "GPU ligada" : starting() ? "GPU ligando…" : "GPU desligada";
+  $("#gpu-on").hidden = !on;
+  $("#gpu-off").hidden = on;
+  if (!on) {
+    $("#step-paired").hidden = !pairing;
+    $("#step-code").hidden = Boolean(pairing);
+    // Quem ainda nao pareou precisa do caminho manual a vista; depois ele so atrapalha.
+    if (!$("#gpu").open) $("#manual").open = !pairing;
+    const notebook = store.get("notebook", "");
+    $("#open-notebook").hidden = !notebook;
+    $("#open-notebook").href = notebook || "#";
+    if (document.activeElement !== $("#notebook-url")) $("#notebook-url").value = notebook;
+    return;
+  }
+
+  const rows = fact("Placa", status.gpu || "—");
+  for (const [name, label] of Object.entries(SET_NAMES)) {
+    const info = status.models[name];
+    const ok = Boolean(info && info.ok);
+    rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
+                      ok ? "yes" : "no"));
+  }
+  const enhancer = status.enhancer;
+  const detail = enhancer.state === "error" || enhancer.state === "off" ? enhancer.detail : "";
+  rows.push(...fact("Melhorar prompt", ENHANCER_TEXT[enhancer.state] + (detail ? ` (${detail})` : ""),
+                    enhancer.state === "ready" ? "yes" : "no"));
+  if (status.extras) rows.push(...fact("Baixando", status.extras));
+  $("#gpu-facts").replaceChildren(...rows);
+
+  const idle = status.idle;
+  const note = $("#idle-note");
+  note.hidden = !idle.limit;
+  if (idle.limit) {
+    const left = idleLeft();
+    note.textContent = `Para poupar sua cota, a GPU desliga sozinha após ${Math.round(idle.limit / 60)} min sem uso.`
+      + (left === null ? "" : ` Faltam ${Math.max(1, Math.ceil(left / 60))} min.`);
+  }
+  $("#keep-alive").hidden = !idle.limit;
+  $("#shutdown").hidden = !status.managed;
+}
+
+function openGpu() {
+  if (!SITE && !online()) return;  // sem GPU e sem site estatico nao ha o que mostrar
+  renderGpu();
+  if (!$("#gpu").open) $("#gpu").showModal();
+}
+
+async function tryConnect() {
+  const data = parseCode($("#connect-code").value);
+  const error = $("#connect-error");
+  error.hidden = Boolean(data);
+  if (!data) {
+    error.textContent = "Código inválido. Copie de novo a linha inteira que o notebook mostrou.";
+    return;
+  }
+  connect(data);
+  $("#connect-code").value = "";
+  if (!hasSession(data)) {  // so o pareamento: nada a testar agora, a descoberta cuida do resto
+    renderGpu();
+    lastDiscover = 0;
+    discover();
+    return;
+  }
+  status = null;
+  await refreshStatus();
+  if (online() || status) {
+    $("#gpu").close();
+    pollJobs();
+  } else {
+    error.hidden = false;
+    error.textContent = "Código aceito, mas a GPU não respondeu. Confira se o notebook ainda está rodando.";
+  }
+}
+
+// ---------------------------------------------------------------- galeria no navegador
+
+const library = new Map();  // id -> { id, job, blob, inputs, url }
+let dbPromise = null;
+
+function openDb() {
+  dbPromise ??= new Promise((resolve, reject) => {
+    const request = indexedDB.open("wan-studio", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("items", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return dbPromise;
+}
+
+async function db(mode, action) {
+  const database = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction("items", mode);
+    const request = action(tx.objectStore("items"));
+    tx.oncomplete = () => resolve(request.result);
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
+
+function remember(item) {
+  library.set(item.id, { ...item, url: URL.createObjectURL(item.blob) });
+}
+
+async function loadLibrary() {
+  try {
+    for (const item of await db("readonly", (items) => items.getAll())) remember(item);
+  } catch { /* sem IndexedDB a galeria vale so enquanto a aba estiver aberta */ }
+}
+
+let persistenceAsked = false;
+
+function askPersistence() {
+  if (persistenceAsked || !navigator.storage || !navigator.storage.persist) return;
+  persistenceAsked = true;
+  navigator.storage.persist().catch(() => {});
+}
+
+function renderGalleryNote() {
+  const count = library.size;
+  if (!count) {
+    $("#gallery-note").textContent = "O que você gerar fica guardado neste navegador, mesmo com a GPU desligada.";
+    return;
+  }
+  let bytes = 0;
+  for (const item of library.values()) bytes += item.blob.size;
+  const size = bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+  $("#gallery-note").textContent = `${count} ${count === 1 ? "item guardado" : "itens guardados"} neste navegador · ${size}`;
+}
+
+// ---------------------------------------------------------------- formulario
+
+function syncChoices(key) {
+  for (const group of $$(`[data-key="${key}"]`)) {
+    const attr = group.getAttribute("role") === "tablist" ? "aria-selected" : "aria-pressed";
+    for (const button of $$("button[data-value]", group)) {
+      button.setAttribute(attr, String(button.dataset.value === state[key]));
+    }
+  }
+}
+
+function choose(key, value) {
+  state[key] = value;
+  store.set("settings", state);
+  syncChoices(key);
+}
+
+function nameOf(list, id) {
+  const item = list.find((entry) => entry.id === id);
+  return item ? item.name : id;
+}
+
+function neededSet(mode, model) {
+  if (mode === "swap") return "animate";
+  if (model === "5b") return "5b";
+  return mode === "t2v" || mode === "img" ? "14b_t2v" : "14b_i2v";
+}
+
+function modelOk(mode, model) {
+  if (model === "5b" && mode === "flf") return false;
+  if (!online()) return true;  // sem GPU nao da para saber: nao bloqueia a escolha
+  const info = status.models[neededSet(mode, model)];
+  return Boolean(info && info.ok);
+}
+
+let undoText = null;       // texto anterior, enquanto "Desfazer melhoria" vale
+let enhancedText = null;   // ultimo resultado do melhorador, para nao melhorar duas vezes
+let enhancing = false;
+
+function refreshEnhance() {
+  const enhancer = online() ? status.enhancer : { state: "off" };
+  // Na troca de pessoa o prompt e opcional e o video ja dita a cena.
+  const visible = state.mode !== "swap" && ["ready", "waiting", "loading", "sleeping"].includes(enhancer.state);
+  $("#enhance").hidden = !visible;
+  $("#auto-row").hidden = !visible;
+  if (!visible) return;
+  const button = $("#enhance");
+  button.disabled = false;
+  if (enhancing) {
+    button.textContent = "Melhorando…";
+    button.disabled = true;
+  } else if (undoText !== null) {
+    button.textContent = "Desfazer melhoria";
+  } else if (enhancer.state !== "ready") {
+    button.textContent = `Melhorar com IA (${ENHANCER_TEXT[enhancer.state]})`;
+    button.disabled = true;
+  } else {
+    button.textContent = "Melhorar com IA";
+  }
+}
+
+/** Quanto a troca de pessoa deve levar, em minutos, com as escolhas atuais. Com duas GPUs o
+ * video e gerado do meio para as pontas, dois pedacos por vez (veja app/stitch.py). */
+function swapMinutes() {
+  const frames = Number(state.length) * SWAP_FPS;
+  const hd = $("#hd").checked && !$("#hd-row").hidden;
+  // Com a alta definicao, numa placa pequena, os pedacos sao de 49 quadros (o servidor decide).
+  const small = !(online() && (status.vram || 0) >= ULTRA_MIN_VRAM);
+  const chunk = Math.min(SWAP_CHUNKS[state.quality] || SWAP_CHUNK, hd && small ? 49 : SWAP_CHUNK);
+  const stride = chunk - SWAP_OVERLAP;
+  // Os pedacos saem um depois do outro, cada um continuando do anterior: o tempo acompanha
+  // os quadros a gerar (um pedaco pequeno ainda custa uns 45% de um inteiro).
+  const pieces = frames <= chunk ? Math.max(0.45, frames / chunk) : (frames - SWAP_OVERLAP) / stride;
+  // O tempo de um pedaco menor que o de costume cai com os quadros dele, menos a parte fixa.
+  const usual = SWAP_CHUNKS[state.quality] || SWAP_CHUNK;
+  let seconds = SWAP_CHUNK_SECONDS[state.quality] * (0.25 + 0.75 * chunk / usual) * pieces;
+  if (hd) {
+    // A restauracao vem depois, e nela as GPUs trabalham ao mesmo tempo (o Kaggle tem duas).
+    const workers = status ? status.workers || 1 : 2;
+    seconds += SWAP_HD_SECONDS * (chunk / 49) * pieces / workers;
+  }
+  return Math.max(1, Math.round(seconds / gpuSpeed() / 60));
+}
+
+/** Quantas vezes a placa ligada e mais rapida que a T4 (1 para a T4 ou sem conexao). */
+function gpuSpeed() {
+  const name = (online() && status.gpu || "").toUpperCase();
+  const found = GPU_SPEED.find(([model]) => name.includes(model));
+  return found ? found[1] : 1;
+}
+
+function refreshForm() {
+  const mode = state.mode;
+  const image = mode === "img";
+  const swap = mode === "swap";
+
+  let ready;
+  if (swap) {  // modelo fixo: o Animate
+    ready = !online() || Boolean(status.models.animate && status.models.animate.ok);
+  } else {
+    const usable = ["5b", "14b"].filter((model) => modelOk(mode, model));
+    if (usable.length && !usable.includes(state.model)) choose("model", usable[0]);
+    for (const button of $$('[data-key="model"] button')) button.disabled = !usable.includes(button.dataset.value);
+    ready = usable.length > 0;
+  }
+
+  const note = $("#mode-note");
+  note.hidden = ready;
+  if (!ready) {
+    note.textContent = status && status.extras
+      ? `Os modelos deste modo ainda estão sendo baixados (${status.extras}).`
+      : "Os modelos deste modo não estão instalados nesta GPU.";
+  }
+
+  const info = online() ? status.models[neededSet(mode, state.model)] : null;
+  // Imagem nao tem turbo: o servidor usa sempre os passos completos (veja workflows.resolve).
+  // A troca de pessoa tem a propria escolha de qualidade, sempre com a LoRA de poucos passos.
+  $("#fast-row").hidden = image || swap || (Boolean(info) && !info.turbo);
+  $("#fast-label").textContent = state.model === "5b"
+    ? "Turbo: 3 passos em vez de 20, bem mais rápido (desmarque se o resultado sair estranho)"
+    : "Turbo: 4 passos em vez de 20, bem mais rápido";
+
+  $("#frames").hidden = !(mode === "i2v" || mode === "flf" || swap);
+  $('[data-frame="end_image"]').hidden = mode !== "flf";
+  $('[data-frame="video"]').hidden = !swap;
+  $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : "Frame inicial";
+  $("#swap-options").hidden = !swap;
+  $("#prompt").placeholder = swap
+    ? "Opcional: descreva a pessoa ou a cena…"
+    : "Descreva a cena: quem aparece, onde, o que acontece, a luz…";
+
+  // Na troca, tamanho e proporcao vem do video, a duracao vai ate 60 s e nao ha presets nem lote.
+  $('[data-key="duration"]').hidden = swap;
+  $('[data-key="length"]').hidden = !swap;
+  $("#resolution-field").hidden = swap;
+  // A "ultra" pede uma placa grande; sem ela o botao some e a escolha guardada volta atras.
+  const big = online() && (status.vram || 0) >= ULTRA_MIN_VRAM;
+  $('[data-key="quality"] [data-value="ultra"]').hidden = !big;
+  if (online() && !big && state.quality === "ultra") choose("quality", "maxima");
+  // Quem ja gera em 720p nao passa pela alta definicao (o arquivo nao ficaria maior).
+  $("#hd-row").hidden = !(swap && info && info.hd) || state.quality === "ultra";
+  $("#fluid-row").hidden = !(swap && info && info.rife);
+  $("#swap-estimate").textContent = swap
+    ? (gpuSpeed() === 1 ? "Tempo estimado na GPU gratuita" : "Tempo estimado nesta placa (conta ainda não conferida nela)")
+      + `: cerca de ${swapMinutes()} min. Pode deixar esta página aberta e voltar depois.`
+    : "";
+  $("#duration-field").hidden = image;
+  $("#start-field").hidden = !swap;
+  $("#count-field").hidden = swap;
+  $("#aspect-field").hidden = swap;
+  $("#presets-field").hidden = swap;
+  $("#swap-model").hidden = !swap;
+  $('[data-key="model"]').hidden = swap;
+
+  // Imagem parada nao tem movimento de camera.
+  const tab = image && state.tab === "camera" ? "style" : state.tab;
+  $('[data-key="tab"] [data-value="camera"]').hidden = image;
+  for (const button of $$('[data-key="tab"] button')) button.setAttribute("aria-selected", String(button.dataset.value === tab));
+  $("#cameras").hidden = tab !== "camera";
+  $("#effects").hidden = tab !== "effect";
+  $("#styles").hidden = tab !== "style";
+  for (const [key, list] of [["camera", presets.cameras], ["effect", presets.effects], ["style", presets.styles]]) {
+    $(`[data-pick="${key}"]`).textContent = state[key] === "none" ? "" : nameOf(list, state[key]);
+  }
+
+  refreshEnhance();
+
+  const submit = $("#submit");
+  const count = Number(state.count);
+  if (online()) {
+    const noun = image ? ["imagem", "imagens"] : ["vídeo", "vídeos"];
+    if (swap) submit.textContent = submitting ? "Enviando o vídeo…" : "Trocar pessoa";
+    else submit.textContent = submitting ? "Enviando…" : count > 1 ? `Gerar ${count} ${noun[1]}` : `Gerar ${noun[0]}`;
+    submit.disabled = submitting || !ready;
+  } else if (status || (SITE && starting())) {
+    submit.textContent = status ? "A GPU está iniciando…" : "A GPU está ligando…";
+    submit.disabled = true;
+  } else {
+    submit.textContent = SITE ? "Ligar a GPU para gerar" : "GPU fora do ar";
+    submit.disabled = !SITE;
+  }
+}
+
+function renderPresets() {
+  $("#cameras").replaceChildren(...presets.cameras.map((camera) => {
+    const scene = el("div", { className: "scene" }, el("div", { className: "bg" }), el("div", { className: "subj" }));
+    const thumb = el("div", { className: "thumb" }, scene, animIcon(camera.anim));
+    thumb.dataset.anim = camera.anim;
+    const button = el("button", { type: "button", className: "camera" }, thumb, camera.name);
+    button.dataset.value = camera.id;
+    return button;
+  }));
+  for (const [id, list] of [["#effects", presets.effects], ["#styles", presets.styles]]) {
+    $(id).replaceChildren(...list.map((item) => {
+      const button = el("button", { type: "button", className: "chip", textContent: item.name });
+      button.dataset.value = item.id;
+      return button;
+    }));
+  }
+}
+
+/** Descarta escolhas salvas que nao existem mais (preset removido, opcao renomeada). */
+function sanitize() {
+  for (const key of Object.keys(DEFAULTS)) {
+    const value = CSS.escape(String(state[key]));
+    if (!$(`[data-key="${key}"] button[data-value="${value}"]`)) state[key] = DEFAULTS[key];
+    syncChoices(key);
+  }
+}
+
+// ---------------------------------------------------------------- imagens de entrada
+
+function nearestAspect(width, height) {
+  const ratio = width / height;
+  const options = { "16:9": 16 / 9, "9:16": 9 / 16, "1:1": 1 };
+  return Object.keys(options).reduce((best, key) =>
+    Math.abs(Math.log(options[key] / ratio)) < Math.abs(Math.log(options[best] / ratio)) ? key : best);
+}
+
+/** Guarda o arquivo de uma das entradas (imagens ou o video) e mostra a previa. */
+function setFrame(name, file) {
+  const drop = $(`[data-frame="${name}"]`);
+  const preview = $("img, video", drop);
+  const isVideo = preview.tagName === "VIDEO";
+  files[name] = file;
+  if (preview.dataset.url) URL.revokeObjectURL(preview.dataset.url);
+  preview.hidden = $(".drop-clear", drop).hidden = !file;
+  $(".drop-label", drop).hidden = Boolean(file);
+  if (!file) {
+    delete preview.dataset.url;
+    preview.removeAttribute("src");
+    if (isVideo) preview.load();
+    $("input", drop).value = "";
+    return;
+  }
+  // A proporcao acompanha a imagem inicial (na troca de pessoa, quem manda e o video).
+  preview.onload = name === "start_image"
+    ? () => { if (state.mode !== "swap") choose("aspect", nearestAspect(preview.naturalWidth, preview.naturalHeight)); }
+    : null;
+  preview.dataset.url = URL.createObjectURL(file);
+  preview.src = preview.dataset.url;
+  if (isVideo) preview.play().catch(() => {});
+  showError("");  // um aviso de arquivo faltando deixa de valer
+}
+
+function bindFrames() {
+  for (const drop of $$(".drop")) {
+    const name = drop.dataset.frame;
+    const kind = name === "video" ? "video/" : "image/";
+    const input = $("input", drop);
+    input.addEventListener("change", () => setFrame(name, input.files[0] || null));
+    $(".drop-clear", drop).addEventListener("click", (event) => {
+      event.preventDefault();
+      setFrame(name, null);
+    });
+    drop.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      drop.classList.add("over");
+    });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", (event) => {
+      event.preventDefault();
+      drop.classList.remove("over");
+      const file = [...event.dataTransfer.files].find((entry) => entry.type.startsWith(kind));
+      if (file) setFrame(name, file);
+    });
+  }
+  document.addEventListener("paste", (event) => {
+    if ($("#frames").hidden) return;
+    const file = [...event.clipboardData.files].find((entry) => entry.type.startsWith("image/"));
+    if (!file) return;
+    event.preventDefault();
+    setFrame(state.mode === "flf" && files.start_image ? "end_image" : "start_image", file);
+  });
+}
+
+// ---------------------------------------------------------------- gerar e melhorar
+
+function showError(message) {
+  $("#error").textContent = message || "";
+  $("#error").hidden = !message;
+}
+
+function friendly(error) {
+  // TypeError = rede; TimeoutError = sem resposta. Os demais sao mensagens do servidor.
+  return error.name === "TypeError" || error.name === "TimeoutError"
+    ? "Sem resposta da GPU. Confira se ela ainda está ligada."
+    : error.message;
+}
+
+async function readError(response) {
+  const data = await response.json().catch(() => ({}));
+  return new Error(data.error || `erro ${response.status}`);
+}
+
+const pendingInputs = new Map();  // id do job -> arquivos enviados, para o "Reusar"
+
+async function submit(event) {
+  event.preventDefault();
+  if (!online()) {
+    openGpu();
+    return;
+  }
+  showError("");
+  const swap = state.mode === "swap";
+  if (swap && !(files.start_image && files.video)) {
+    showError("Envie a imagem da pessoa e o vídeo.");
+    return;
+  }
+  if (swap && files.video.size > MAX_VIDEO_BYTES) {
+    showError("O vídeo passa de 100 MB. Corte um trecho menor e envie de novo.");
+    return;
+  }
+  const prompt = $("#prompt").value.trim();
+  const seed = $("#seed").value.trim();
+  const params = {
+    mode: state.mode, model: state.model, aspect: state.aspect, resolution: state.resolution,
+    duration: Number(swap ? state.length : state.duration), quality: state.quality, count: Number(state.count),
+    camera: state.mode === "img" ? "none" : state.camera, effect: state.effect, style: state.style,
+    prompt, negative: $("#negative").value, fast: $("#fast").checked,
+    seed: seed === "" ? null : Number(seed),
+    auto_enhance: !$("#auto-row").hidden && $("#auto-enhance").checked && prompt !== enhancedText,
+    replace: $("#replace").checked, start: Number($("#start").value) || 0,
+    hd: !$("#hd-row").hidden && $("#hd").checked,
+    fluid: !$("#fluid-row").hidden && $("#fluid").checked,
+  };
+  const wanted = { i2v: ["start_image"], flf: ["start_image", "end_image"], swap: ["start_image", "video"] }[state.mode] || [];
+  const inputs = {};
+  const body = new FormData();
+  body.append("params", JSON.stringify(params));
+  for (const name of wanted) {
+    if (!files[name]) continue;
+    body.append(name, files[name]);
+    // Videos grandes nao sao guardados para o "Reusar": ocupariam a galeria do navegador.
+    if (name !== "video" || files[name].size <= MAX_STORED_VIDEO) inputs[name] = files[name];
+  }
+
+  submitting = true;
+  refreshForm();
+  try {
+    const response = await api("/api/generate", { method: "POST", body, timeout: swap ? VIDEO_UPLOAD_TIMEOUT : UPLOAD_TIMEOUT });
+    if (!response.ok) throw await readError(response);
+    for (const job of (await response.json()).jobs) pendingInputs.set(job.id, inputs);
+    await pollJobs();
+    if (window.matchMedia("(max-width: 860px)").matches) $(".gallery-wrap").scrollIntoView({ behavior: "smooth" });
+  } catch (error) {
+    showError(friendly(error));
+  } finally {
+    submitting = false;
+    refreshForm();
+  }
+}
+
+async function enhance() {
+  const box = $("#prompt");
+  if (undoText !== null) {
+    box.value = undoText;
+    undoText = enhancedText = null;
+    refreshEnhance();
+    return;
+  }
+  const text = box.value.trim();
+  if (!text) {
+    showError("Escreva um prompt primeiro.");
+    return;
+  }
+  showError("");
+  enhancing = true;
+  refreshEnhance();
+  try {
+    const response = await api("/api/enhance", {
+      method: "POST", timeout: UPLOAD_TIMEOUT, headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: text, mode: state.mode, camera: state.mode === "img" ? "none" : state.camera }),
+    });
+    if (!response.ok) throw await readError(response);
+    enhancedText = (await response.json()).prompt;
+    undoText = text;
+    box.value = enhancedText;
+  } catch (error) {
+    showError(friendly(error));
+  } finally {
+    enhancing = false;
+    refreshEnhance();
+  }
+}
+
+// ---------------------------------------------------------------- galeria
+
+let liveJobs = [];
+const cards = new Map();       // id -> { node, signature }
+const collecting = new Set();
+const collectTries = new Map();
+const pace = new Map();        // id -> primeira leitura com progresso, para estimar o tempo
+const baseTitle = document.title;
+
+/** Baixa o arquivo pronto da GPU para a galeria do navegador e libera o disco de la. */
+async function collect(job) {
+  if (collecting.has(job.id) || (collectTries.get(job.id) || 0) >= MAX_COLLECT_TRIES) return;
+  collecting.add(job.id);
+  try {
+    const response = await api(job.url, { timeout: DOWNLOAD_TIMEOUT });
+    if (!response.ok) throw new Error(`download ${response.status}`);
+    const item = { id: job.id, job: { ...job }, blob: await response.blob(), inputs: pendingInputs.get(job.id) || null };
+    const saved = await db("readwrite", (items) => items.put(item)).then(() => true, () => false);
+    remember(item);
+    pendingInputs.delete(job.id);
+    if (saved) {
+      askPersistence();
+      api(`/api/jobs/${job.id}`, { method: "DELETE" }).catch(() => {});
+    }
+    if (document.hidden) document.title = "✓ Pronto · " + baseTitle;
+  } catch {
+    collectTries.set(job.id, (collectTries.get(job.id) || 0) + 1);
+  } finally {
+    collecting.delete(job.id);
+  }
+  render();
+  renderGalleryNote();
+}
+
+async function loadJobs() {
+  let jobs = [];
+  if (status) {
+    try {
+      const response = await api("/api/jobs");
+      jobs = response.ok ? (await response.json()).jobs : liveJobs;
+    } catch {
+      jobs = liveJobs;  // falha passageira: mantem o que ja estava na tela
+    }
+  }
+  liveJobs = jobs;
+  for (const job of jobs) {
+    if (job.status === "done" && !library.has(job.id)) collect(job);
+  }
+  render();
+  return jobs.some((job) => ACTIVE.includes(job.status)) || collecting.size > 0;
+}
+
+let pollTimer = null;
+let pollRun = 0;
+
+/** Atualiza a galeria agora e reagenda: rapido enquanto ha job em andamento. Chamar de novo
+ *  (ao enviar um job, ao conectar) antecipa a proxima leitura em vez de esperar a agendada. */
+async function pollJobs() {
+  const run = ++pollRun;
+  clearTimeout(pollTimer);
+  const busy = await loadJobs();
+  if (run !== pollRun) return;  // uma chamada mais nova assumiu o ritmo
+  pollTimer = setTimeout(pollJobs, busy ? 1500 : 5000);
+}
+
+function etaText(job) {
+  const now = Date.now() / 1000;
+  const first = pace.get(job.id);
+  if (!first) {
+    if (job.progress > 0) pace.set(job.id, { time: now, progress: job.progress });
+    return "";
+  }
+  const gained = job.progress - first.progress;
+  if (gained < 0.05) return "";
+  const left = (now - first.time) * (1 - job.progress) / gained;
+  return left < 60 ? "menos de 1 min" : `~${Math.round(left / 60)} min`;
+}
+
+function waitText(item) {
+  if (item.status === "preparing") return "Preparando o prompt…";
+  if (item.status === "done") {
+    return (collectTries.get(item.id) || 0) >= MAX_COLLECT_TRIES
+      ? "Não consegui baixar o arquivo da GPU."
+      : "Salvando na galeria…";
+  }
+  if (item.status === "queued") {
+    const ahead = liveJobs.filter((job) => ACTIVE.includes(job.status) && job.created < item.created).length;
+    return ahead ? `Na fila · ${ahead} na frente` : "Na fila…";
+  }
+  // Etapas que nao sao amostragem (analisando o video, recortando a pessoa, finalizando).
+  if (item.stage) return item.stage.charAt(0).toUpperCase() + item.stage.slice(1) + "…";
+  const percent = Math.round(item.progress * 100);
+  if (!percent) return "Carregando o modelo…";
+  const eta = etaText(item);
+  // Troca de pessoa longa: o video sai em pedacos.
+  const pieces = item.chunks > 1 ? ` · pedaço ${Math.min(item.chunks, (item.chunks_done || 0) + 1)} de ${item.chunks}` : "";
+  return `Gerando… ${percent}%${pieces}${eta ? " · " + eta : ""}`;
+}
+
+/** O que mostrar como titulo: o prompt, ou o nome do modo quando ele e opcional. */
+function titleOf(job) {
+  return job.prompt || (job.mode === "swap" ? "Troca de pessoa" : "");
+}
+
+function describe(job) {
+  const swap = job.mode === "swap";
+  const parts = [`Wan 2.2 ${MODEL_NAMES[job.model] || job.model}${job.fast && !swap ? " turbo" : ""}`];
+  if (swap && job.quality) parts.push(`qualidade ${QUALITY_NAMES[job.quality] || job.quality}`);
+  parts.push(`${job.width}×${job.height}`);
+  if (job.kind !== "image") parts.push(`${job.duration} s`);
+  if (job.mode === "swap") parts.push(job.replace === false ? "movimento copiado" : "pessoa trocada");
+  if (job.hd) parts.push(job.hd_method === "seedvr2" ? "alta definição" : "ampliado");
+  if (job.fluid) parts.push(`${job.out_fps} fps`);
+  for (const [key, list] of [["camera", presets.cameras], ["effect", presets.effects], ["style", presets.styles]]) {
+    if (job[key] && job[key] !== "none") parts.push(nameOf(list, job[key]));
+  }
+  parts.push(`seed ${job.seed}`);
+  return parts.join(" · ");
+}
+
+function focusPrompt() {
+  $("#viewer").close();
+  const box = $("#prompt");
+  box.scrollIntoView({ behavior: "smooth", block: "center" });
+  box.focus();
+  box.select();
+}
+
+function reuse(item) {
+  $("#prompt").value = item.prompt;
+  $("#seed").value = item.seed;
+  $("#negative").value = item.negative || "";
+  if (item.kind !== "image") $("#fast").checked = Boolean(item.fast);  // imagem nunca e turbo
+  undoText = enhancedText = null;
+  for (const key of ["mode", "camera", "effect", "style", "model", "aspect", "resolution"]) {
+    if (item[key] !== undefined) state[key] = String(item[key]);
+  }
+  if (item.mode === "swap") {
+    // A duracao gravada e a real do trecho; volta para a menor opcao que a cobre.
+    state.length = String([5, 10, 15, 30, 60].find((option) => option >= item.duration - 0.5) || 60);
+    if (item.quality) state.quality = item.quality;
+    $("#hd").checked = Boolean(item.hd);
+    $("#fluid").checked = Boolean(item.fluid);
+    $("#replace").checked = item.replace !== false;
+    $("#start").value = item.start || "";
+  } else if (item.duration) {
+    state.duration = String(item.duration);
+  }
+  sanitize();
+  store.set("settings", state);
+  const stored = library.get(item.id);
+  const inputs = (stored && stored.inputs) || pendingInputs.get(item.id);
+  if (inputs) {
+    for (const name of Object.keys(files)) setFrame(name, inputs[name] || null);
+  }
+  refreshForm();
+  focusPrompt();
+}
+
+function once(target, event, timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("tempo esgotado")), timeout);
+    target.addEventListener(event, () => { clearTimeout(timer); resolve(); }, { once: true });
+    target.addEventListener("error", () => { clearTimeout(timer); reject(new Error("não foi possível ler o vídeo")); }, { once: true });
+  });
+}
+
+async function lastFrame(url) {
+  const video = el("video", { muted: true, playsInline: true, preload: "auto" });
+  video.src = url;
+  await once(video, "loadeddata");
+  video.currentTime = Math.max(0, video.duration - 0.04);
+  await once(video, "seeked");
+  const canvas = el("canvas", { width: video.videoWidth, height: video.videoHeight });
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("não foi possível capturar o último frame");
+  return blob;
+}
+
+/** Leva uma imagem (gerada, ou o ultimo frame de um video) para o modo Imagem → Video. */
+async function startFrom(item, getBlob) {
+  showError("");
+  try {
+    const blob = await getBlob();
+    $("#prompt").value = item.prompt;
+    undoText = enhancedText = null;
+    state.mode = "i2v";
+    for (const key of ["aspect", "resolution"]) state[key] = String(item[key]);
+    sanitize();
+    store.set("settings", state);
+    setFrame("start_image", new File([blob], `${item.id}.png`, { type: "image/png" }));
+    setFrame("end_image", null);
+    refreshForm();
+    focusPrompt();
+  } catch (error) {
+    $("#viewer").close();
+    showError(error.message);
+  }
+}
+
+async function remove(item) {
+  if ($("#viewer").open && $("#viewer").dataset.id === item.id) $("#viewer").close();
+  const stored = library.get(item.id);
+  if (stored) {
+    URL.revokeObjectURL(stored.url);
+    library.delete(item.id);
+    await db("readwrite", (items) => items.delete(item.id)).catch(() => {});
+  }
+  if (liveJobs.some((job) => job.id === item.id)) {
+    liveJobs = liveJobs.filter((job) => job.id !== item.id);
+    api(`/api/jobs/${item.id}`, { method: "DELETE" }).catch(() => {});
+  }
+  render();
+  renderGalleryNote();
+}
+
+function actionButton(label, onClick, className = "") {
+  const node = el("button", { type: "button", textContent: label, className });
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+/** Excluir pede um segundo clique; cancelar um job em andamento nao. */
+function deleteButton(item) {
+  const cancel = !item.local && ACTIVE.includes(item.status);
+  const label = cancel ? "Cancelar" : "Excluir";
+  let armed = null;
+  const node = actionButton(label, () => {
+    if (cancel || armed) return remove(item);
+    node.textContent = "Confirmar?";
+    armed = setTimeout(() => {
+      armed = null;
+      node.textContent = label;
+    }, 3000);
+  }, "danger");
+  return node;
+}
+
+function actionsFor(item) {
+  const nodes = [];
+  if (item.local) {
+    const extension = item.kind === "image" ? "png" : "mp4";
+    nodes.push(el("a", { href: item.url, download: `wan-${item.id}.${extension}`, textContent: "Baixar" }));
+  }
+  nodes.push(actionButton("Reusar", () => reuse(item)));
+  if (item.local && item.kind === "image") {
+    nodes.push(actionButton("Animar", () => startFrom(item, async () => library.get(item.id).blob)));
+  }
+  if (item.local && item.kind === "video") {
+    nodes.push(actionButton("Continuar", () => startFrom(item, () => lastFrame(item.url))));
+  }
+  nodes.push(deleteButton(item));
+  return nodes;
+}
+
+function openViewer(id) {
+  const stored = library.get(id);
+  if (!stored) return;
+  const item = { ...stored.job, status: "done", url: stored.url, local: true };
+  const media = item.kind === "image"
+    ? el("img", { src: item.url, alt: item.prompt })
+    : el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
+  $("#viewer-media").replaceChildren(media);
+  $("#viewer-prompt").textContent = titleOf(item);
+  const final = $("#viewer-final");
+  final.hidden = !item.final_prompt;
+  final.textContent = item.final_prompt ? `Enviado ao modelo: ${item.final_prompt}` : "";
+  $("#viewer-meta").textContent = describe(item);
+  $("#viewer-actions").replaceChildren(...actionsFor(item));
+  $("#viewer").dataset.id = id;
+  $("#viewer").showModal();
+}
+
+function renderCard(item) {
+  const image = item.kind === "image";
+  let media;
+  if (item.local) {
+    media = el("button", { type: "button", className: "card-media open", title: "Ampliar" });
+    if (image) {
+      media.append(el("img", { src: item.url, alt: item.prompt, loading: "lazy" }));
+    } else {
+      const video = el("video", { src: item.url, muted: true, loop: true, playsInline: true, preload: "metadata" });
+      media.append(video);
+      media.addEventListener("mouseenter", () => video.play().catch(() => {}));
+      media.addEventListener("mouseleave", () => video.pause());
+    }
+    media.append(el("span", { className: "badge", textContent: image ? "Imagem" : `${item.duration} s` }));
+    media.addEventListener("click", () => openViewer(item.id));
+  } else if (item.status === "error") {
+    media = el("div", { className: "card-media" },
+               el("div", { className: "card-wait failed", textContent: item.error || "Falhou" }));
+  } else {
+    const fill = el("i");
+    const bar = el("div", { className: "bar" }, fill);
+    if (item.status === "running" && item.progress > 0) fill.style.width = `${Math.round(item.progress * 100)}%`;
+    else bar.classList.add("busy");
+    media = el("div", { className: "card-media" }, el("div", { className: "card-wait" }, waitText(item), bar));
+  }
+  media.style.aspectRatio = `${item.width} / ${item.height}`;
+
+  return el("article", { className: "card" }, media,
+    el("div", { className: "card-body" },
+      el("p", { className: "card-prompt", textContent: titleOf(item), title: titleOf(item) }),
+      el("p", { className: "card-meta", textContent: describe(item) }),
+      el("div", { className: "card-actions" }, ...actionsFor(item))));
+}
+
+function galleryItems() {
+  const items = liveJobs.filter((job) => !library.has(job.id)).map((job) => ({ ...job, local: false }));
+  for (const stored of library.values()) items.push({ ...stored.job, status: "done", url: stored.url, local: true });
+  return items
+    .filter((item) => state.filter === "all" || item.kind === state.filter)
+    .sort((a, b) => b.created - a.created);
+}
+
+function render() {
+  const items = galleryItems();
+  const gallery = $("#gallery");
+  const seen = new Set();
+  items.forEach((item, index) => {
+    seen.add(item.id);
+    // So redesenha o card quando algo mudou, para nao interromper um video tocando.
+    const signature = item.local ? "local" : `${item.status}|${waitText(item)}|${item.error || ""}`;
+    let entry = cards.get(item.id);
+    if (!entry || entry.signature !== signature) {
+      const node = renderCard(item);
+      if (entry) entry.node.replaceWith(node);
+      entry = { node, signature };
+      cards.set(item.id, entry);
+    }
+    if (gallery.children[index] !== entry.node) gallery.insertBefore(entry.node, gallery.children[index] || null);
+  });
+  for (const [id, entry] of cards) {
+    if (!seen.has(id)) {
+      entry.node.remove();
+      cards.delete(id);
+    }
+  }
+  const empty = $("#empty");
+  empty.hidden = items.length > 0;
+  empty.textContent = state.filter === "all" || !library.size
+    ? "Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo."
+    : "Nada neste filtro.";
+}
+
+// ---------------------------------------------------------------- inicio
+
+function bindUi() {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-key] button[data-value]");
+    if (button && !button.disabled) {
+      const key = button.closest("[data-key]").dataset.key;
+      choose(key, button.dataset.value);
+      refreshForm();
+      if (key === "filter") render();
+    }
+    const close = event.target.closest("[data-close]");
+    if (close) close.closest("dialog").close();
+    if (event.target instanceof HTMLDialogElement) event.target.close();  // clique no fundo
+  });
+
+  $("#form").addEventListener("submit", submit);
+  $("#enhance").addEventListener("click", enhance);
+  $("#hd").addEventListener("change", refreshForm);  // a estimativa de tempo muda com a alta definicao
+  $("#prompt").addEventListener("input", () => {
+    if (undoText === null) return;
+    undoText = null;  // o texto foi editado a mao: nao ha mais o que desfazer
+    refreshEnhance();
+  });
+  $("#prompt").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) $("#form").requestSubmit();
+  });
+
+  $("#status").addEventListener("click", openGpu);
+  $("#connect-go").addEventListener("click", tryConnect);
+  $("#connect-code").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") tryConnect();
+  });
+  $("#notebook-url").addEventListener("change", (event) => {
+    const url = event.target.value.trim();
+    store.set("notebook", /^https:\/\//.test(url) ? url : null);
+    renderGpu();
+  });
+  $("#keep-alive").addEventListener("click", async () => {
+    await api("/api/touch", { method: "POST" }).catch(() => {});
+    refreshStatus();
+  });
+  let armed = null;
+  $("#shutdown").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    if (!armed) {
+      button.textContent = "Confirmar desligamento?";
+      armed = setTimeout(() => {
+        armed = null;
+        button.textContent = "Desligar GPU";
+      }, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    armed = null;
+    button.textContent = "Desligar GPU";
+    await api("/api/shutdown", { method: "POST" }).catch(() => {});
+    $("#gpu").close();
+    $("#status").dataset.state = "warn";
+    $("#status").textContent = "Desligando a GPU…";
+  });
+
+  $("#viewer").addEventListener("close", () => $("#viewer-media").replaceChildren());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    document.title = baseTitle;
+    lastDiscover = 0;  // voltou para a aba: procura a GPU na hora
+    refreshStatus();
+  });
+}
+
+async function init() {
+  // Link de conexao aberto direto: guarda e tira o codigo da barra de endereco.
+  const fromLink = /[#&]c=/.test(location.hash) ? parseCode(location.hash) : null;
+  if (fromLink) {
+    connect(fromLink);
+    try { history.replaceState(null, "", location.pathname + location.search); } catch { /* file:// */ }
+  }
+
+  bindUi();
+  bindFrames();
+  presets = window.WAN_PRESETS || await (await fetch("/api/presets")).json();
+  renderPresets();
+  sanitize();
+  refreshForm();
+  renderStatus();
+
+  await loadLibrary();
+  render();
+  renderGalleryNote();
+
+  await refreshStatus();
+  pollJobs();
+  setInterval(refreshStatus, STATUS_EVERY);
+}
+
+init();
+</script>
+</body>
+</html>

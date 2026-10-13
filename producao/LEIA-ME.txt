@@ -1,0 +1,17 @@
+Produção em massa do Wan Studio
+
+1. Ponha em "pessoa" a imagem da pessoa (uma só).
+2. Ponha em "videos" os vídeos de origem.
+3. Na pasta do Wan Studio, dê dois cliques em "Produzir em massa".
+4. Os resultados aparecem em "prontos". Cada vídeo de origem, depois de feito, vai para "usados".
+
+Para sair bom (medido na GPU em 12/10/2026):
+- A imagem: em pé, como os vídeos, e com o mesmo enquadramento deles (meio corpo se os vídeos
+  mostram meio corpo, corpo inteiro se mostram o corpo inteiro). Rosto bem visível.
+- Os vídeos: uma pessoa só, e o trecho usado deve começar com ela de frente e com um pouco de
+  cenário aparecendo em volta. Começando de costas e enchendo a tela, o modelo inventa coisas.
+
+As opções (qualidade, duração, alta definição...) ficam em "opcoes.txt".
+Dois vídeos são feitos ao mesmo tempo; os outros esperam na fila. Pode fechar a janela e abrir
+de novo depois: ela continua de onde parou. O computador precisa estar ligado para os
+resultados serem baixados.
