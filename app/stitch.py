@@ -10,6 +10,14 @@ pedacos que recuam sao gerados de tras para a frente e desvirados depois.
 Na emenda nao ha mistura: cada pedaco entra a partir do ponto em que deixou de copiar o
 vizinho. So a cor e ajustada, porque a saturacao costuma subir de um pedaco para o seguinte.
 
+Ha um segundo jeito de ocupar as duas GPUs, sem pedaco curto no meio nem pedaco gerado ao
+contrario (que foi o que estragou o primeiro, medido em 12/10/2026): duas cadeias que avancam
+(`chains`). A primeira comeca no primeiro quadro; a segunda comeca perto do meio e, em vez de
+partir do nada, recebe para continuar alguns quadros ja gerados do primeiro pedaco (a
+"ancora"): eles nao sao vizinhos no tempo, servem para ela herdar a aparencia. Os quadros em
+que ela ainda se ajeita sao descartados, e so nessa emenda, entre as duas cadeias, ha mistura:
+os quadros que as duas geraram se fundem aos poucos. Ainda nao foi conferido na GPU.
+
 Tudo e feito com o ffmpeg; as contas sao por numero de quadro, nunca por tempo.
 """
 
@@ -27,6 +35,12 @@ MAX_OFFSET = 24.0
 SCENE_GAIN = 0.06    # se o proprio video muda isto na emenda (corte de cena), nao se corrige
 SCENE_OFFSET = 4.0
 NEUTRAL = (1.0, 0.0)
+# Duas cadeias (`chains`). Sao palpites razoaveis, a conferir na GPU:
+BLEND = 6            # quadros em que as duas cadeias se misturam na emenda entre elas
+SETTLE = 8           # quadros que a segunda gera e descarta depois dos copiados da ancora
+ANCHOR_FIRST = 4     # a partir de que quadro do primeiro pedaco saem os quadros da ancora
+CHAIN_OVERHEAD = 10  # o que um pedaco custa alem dos quadros dele, em quadros (medido: ~14%)
+CHAIN_GAIN = 0.85    # duas cadeias so valem se o tempo cair pelo menos a isto do de uma
 
 
 class StitchError(RuntimeError):
@@ -103,6 +117,58 @@ def plan(total, chunk, overlap, seed=0, minimum=17):
     return pieces
 
 
+def chains(total, chunk, overlap, minimum=17, anchor=True, blend=BLEND, settle=SETTLE):
+    """Como `plan` sem semente, em duas cadeias que avancam ao mesmo tempo (uma por GPU).
+
+    A primeira e o comeco do plano de uma cadeia so. O primeiro pedaco da segunda traz mais
+    tres campos: "blend", quantos quadros ela mistura com o fim da primeira; "skip", quantos
+    quadros do proprio comeco ela descarta antes disso (os copiados da ancora e os de
+    acomodacao); e "anchor", o indice do pedaco de que copia `overlap` quadros para herdar a
+    aparencia (None sem ancora: ai ela parte so da imagem da pessoa, e pode comecar junto com
+    a primeira). Com ancora ela espera o primeiro pedaco.
+
+    O ponto em que uma cadeia entrega para a outra e o que faz as duas terminarem mais cedo,
+    contando o que cada pedaco custa (`_cost`) e essa espera. Se nem assim o tempo cai para
+    CHAIN_GAIN do de uma cadeia so (videos curtos), o plano sai igual ao de `plan`.
+    """
+    single = plan(total, chunk, overlap, 0, minimum)
+    lead = overlap + settle if anchor else 0
+    best, best_key = single, (CHAIN_GAIN * _cost(single), 0)
+    for end in range(minimum, total - minimum + 1):  # o quadro em que a primeira cadeia acaba
+        head = plan(end, chunk, overlap, 0, minimum)
+        if not head or head[-1]["start"] + head[-1]["length"] != end:
+            continue  # um pedaco so que nao fecha 4n+1: perderia quadros
+        seam = end - blend  # o primeiro quadro que a segunda cadeia fornece
+        # A mistura tem de caber no que o ultimo pedaco da primeira cadeia fornece de seu.
+        if seam < head[-1]["start"] + (overlap if len(head) > 1 else 0):
+            continue
+        start = seam - lead
+        rest = total - start
+        if rest <= chunk:  # um pedaco so: comeca um pouco antes para fechar 4n+1 sem perder o fim
+            start -= (1 - rest) % 4
+            rest = total - start
+        tail = plan(rest, chunk, overlap, 0, minimum) if start >= 0 else []
+        # ... e no que o primeiro pedaco da segunda gera depois de se acomodar.
+        if not tail or tail[-1]["start"] + tail[-1]["length"] != rest or tail[0]["length"] < seam - start + blend:
+            continue
+        wait = _cost(head[:1]) if anchor else 0
+        key = (max(_cost(head), wait + _cost(tail)), _cost(head) + _cost(tail))
+        if key < best_key:
+            pieces = [dict(piece) for piece in head]
+            for number, piece in enumerate(tail):
+                pieces.append({"start": start + piece["start"], "length": piece["length"],
+                               "after": None if number == 0 else len(head) + number - 1, "reverse": False})
+            pieces[len(head)].update(anchor=0 if anchor else None, skip=seam - start, blend=blend)
+            best, best_key = pieces, key
+    return best
+
+
+def _cost(pieces):
+    """Quanto tempo uma fila de pedacos leva, em quadros gerados: cada pedaco custa os quadros
+    dele e mais um tanto fixo (analise do video, recorte, leitura e gravacao)."""
+    return sum(piece["length"] + CHAIN_OVERHEAD for piece in pieces)
+
+
 def copied(pieces, index, overlap):
     """Os quadros que o pedaco `index` copia do vizinho de que continua, como (indice do
     vizinho, primeiro quadro dentro do vizinho): sao sempre `overlap` quadros, os primeiros
@@ -113,17 +179,33 @@ def copied(pieces, index, overlap):
     return piece["after"], first - source["start"]
 
 
+def anchored(pieces, index, overlap):
+    """O mesmo que `copied` para o pedaco que comeca uma segunda cadeia: os `overlap` quadros
+    da ancora, que nao sao vizinhos dele no tempo."""
+    source = pieces[index]["anchor"]
+    return source, max(0, min(ANCHOR_FIRST, pieces[source]["length"] - overlap))
+
+
 def bounds(pieces, overlap):
     """O trecho do video que cada pedaco fornece, como (primeiro, fim) em quadros do video:
-    do ponto em que deixou de copiar o vizinho ate o ponto em que o proximo assume."""
-    cuts = [0]
+    do ponto em que deixou de copiar o vizinho ate o ponto em que o proximo assume. Os trechos
+    encostam um no outro, menos na emenda entre duas cadeias, onde os quadros da mistura
+    (`blend`) estao nos dois."""
+    firsts, ends = [0], []
     for earlier, later in zip(pieces, pieces[1:]):
+        if later.get("blend"):
+            seam = later["start"] + later.get("skip", 0)
+            firsts.append(seam)
+            ends.append(seam + later["blend"])
+            continue
         if later["reverse"] or earlier["reverse"]:  # o de antes continua do de depois
-            cuts.append(earlier["start"] + earlier["length"] - overlap)
+            cut = earlier["start"] + earlier["length"] - overlap
         else:
-            cuts.append(later["start"] + overlap)
-    cuts.append(pieces[-1]["start"] + pieces[-1]["length"])
-    spans = list(zip(cuts, cuts[1:]))
+            cut = later["start"] + overlap
+        firsts.append(cut)
+        ends.append(cut)
+    ends.append(pieces[-1]["start"] + pieces[-1]["length"])
+    spans = list(zip(firsts, ends))
     for piece, (first, end) in zip(pieces, spans):
         if not piece["start"] <= first < end <= piece["start"] + piece["length"]:
             raise StitchError("plano de pedaços inconsistente")
@@ -134,13 +216,20 @@ def fine(pieces, spans, factor):
     """Os trechos de `bounds` quando a sequencia de cada pedaco tem, entre dois quadros gerados,
     `factor` - 1 intermediarios (o quadro k do pedaco fica no indice `factor` * k), em indices
     dessa sequencia mais fina. Os intermediarios de uma emenda vem do pedaco que tem os dois
-    quadros vizinhos a ela: o que continuou do outro."""
-    cuts = [0]
-    for earlier, later, (_, edge) in zip(pieces, pieces[1:], spans):
+    quadros vizinhos a ela: o que continuou do outro. Na emenda entre duas cadeias, cada uma
+    entra com os seus, do primeiro ao ultimo quadro gerado da mistura."""
+    firsts, ends = [0], []
+    for earlier, later, (_, edge), (begin, _) in zip(pieces, pieces[1:], spans, spans[1:]):
+        if later.get("blend"):
+            firsts.append(factor * begin)
+            ends.append(factor * (edge - 1) + 1)
+            continue
         continued = earlier if later["reverse"] or earlier["reverse"] else later
-        cuts.append(factor * edge - (0 if continued is earlier else factor - 1))
-    cuts.append(factor * (pieces[-1]["start"] + pieces[-1]["length"] - 1) + 1)
-    return list(zip(cuts, cuts[1:]))
+        cut = factor * edge - (0 if continued is earlier else factor - 1)
+        firsts.append(cut)
+        ends.append(cut)
+    ends.append(factor * (pieces[-1]["start"] + pieces[-1]["length"] - 1) + 1)
+    return list(zip(firsts, ends))
 
 
 async def cut(source, target, start, length, reverse=False, ffmpeg="ffmpeg"):
@@ -236,10 +325,22 @@ async def color_fixes(chunks, spans, original=None, factor=1, ffmpeg="ffmpeg"):
     video; o `original`, medido nos mesmos quadros, diz quanto, e essa parte nao e corrigida.
     Se ele muda demais ali, e corte de cena e nao da para comparar. `factor`: veja `fine`."""
     fixes = [None] * len(chunks)
-    order = sorted(range(len(chunks)), key=lambda index: (chunks[index]["after"] is not None,
+    # Quem depende de outro vem depois dele: a semente, depois os vizinhos, do mais proximo ao
+    # mais distante (o comeco de uma segunda cadeia depende do pedaco logo antes).
+    order = sorted(range(len(chunks)), key=lambda index: (chunks[index]["after"] is not None
+                                                          or bool(chunks[index].get("blend")),
                                                           abs(index - _seed(chunks))))
     for index in order:
         chunk = chunks[index]
+        if chunk.get("blend"):
+            # Entre duas cadeias a comparacao e direta: as duas geraram os mesmos quadros.
+            other = chunks[index - 1]
+            first = spans[index][0]
+            span = factor * (min(chunk["blend"], spans[index][1] - first) - 1) + 1
+            ours = await color_stats(chunk["pattern"], factor * (first - chunk["start"]), span, ffmpeg)
+            base = await color_stats(other["pattern"], factor * (first - other["start"]), span, ffmpeg)
+            fixes[index] = match(applied(base, fixes[index - 1]), ours)
+            continue
         if chunk["after"] is None:
             fixes[index] = [NEUTRAL] * 3
             continue
@@ -285,10 +386,32 @@ def filtergraph(chunks, spans, fixes, fps, size, out_fps=None, factor=1):
         chain.append("setpts=PTS-STARTPTS")
         parts.append(f"[{index}:v]{','.join(chain)}[p{index}]")
         order.append(f"[p{index}]")
-    joined = order[0]
-    if len(order) > 1:
-        joined = "[cat]"
-        parts.append(f"{''.join(order)}concat=n={len(order)}:v=1:a=0{joined}")
+    # Cada cadeia e uma fila de pedacos colados; entre duas cadeias, os quadros que as duas
+    # geraram se fundem (xfade), e o video segue pela segunda.
+    runs = [[0]]
+    for index in range(1, len(chunks)):
+        if chunks[index].get("blend"):
+            runs.append([index])
+        else:
+            runs[-1].append(index)
+    if len(runs) == 1:
+        joined = order[0]
+        if len(order) > 1:
+            joined = "[cat]"
+            parts.append(f"{''.join(order)}concat=n={len(order)}:v=1:a=0{joined}")
+    else:
+        for number, run in enumerate(runs):
+            members = "".join(order[index] for index in run)
+            glue = f"concat=n={len(run)}:v=1:a=0," if len(run) > 1 else ""
+            # O xfade conta em tempo: as duas entradas precisam do mesmo relogio, quadro a quadro.
+            parts.append(f"{members}{glue}setpts=N/({fps}*TB),fps={fps}[r{number}]")
+        joined, length = "[r0]", sum(spans[index][1] - spans[index][0] for index in runs[0])
+        for number, run in enumerate(runs[1:], start=1):
+            mixed = spans[run[0] - 1][1] - spans[run[0]][0]  # quadros que as duas cadeias tem
+            parts.append(f"{joined}[r{number}]xfade=transition=fade:duration={mixed / fps:.6f}:"
+                         f"offset={(length - mixed) / fps:.6f}[x{number}]")
+            joined = f"[x{number}]"
+            length += sum(spans[index][1] - spans[index][0] for index in run) - mixed
     final = f"{joined}setpts=N/({fps}*TB)"
     if out_fps and out_fps != fps:  # quadros intermediarios por estimativa de movimento
         final += f",minterpolate=fps={out_fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1"

@@ -40,11 +40,17 @@ MANAGED = os.environ.get("WAN_MANAGED") == "1"
 # O worker cuja GPU e a mesma do melhorador de prompt (-1: nenhum). Os dois nao cabem juntos
 # na memoria: quando esse worker entra em uso o melhorador sai, e volta depois.
 ENHANCER_WORKER = int(os.environ.get("ENHANCER_WORKER", "-1"))
+# A sessao so faz troca de pessoa (vm/setup.sh nao baixou os outros modelos nem o melhorador
+# de prompt): o site mostra so esse modo.
+ONLY_SWAP = bool(os.environ.get("SO_TROCA"))
 # Cinco minutos: quem faz uma troca de pessoa atras da outra nao espera o melhorador recarregar
 # (um minuto) e descarregar de novo a cada pedido.
 ENHANCER_RETURN_AFTER = float(os.environ.get("ENHANCER_RETURN_AFTER", "300"))
 # Aquecer cada GPU para a troca de pessoa assim que ela estiver instalada (veja `warm_up`).
 WARM_UP = os.environ.get("WARM_UP", "1") == "1"
+# Quanto esta maquina custa por hora ligada, em dolares (0: nada, como no Kaggle). Quem a liga
+# informa (nuvem/sessao.py); serve para o site mostrar quanto cada video gasta do credito.
+PRICE_HOUR = float(os.environ.get("WAN_PRICE_HOUR") or 0)
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parent
@@ -97,6 +103,7 @@ MODEL_LISTS = {
     "detection": ("OnnxDetectionModelLoader", "vitpose_model"),
     "upscale": ("UpscaleModelLoader", "model_name"),
     "frame_interpolation": ("FrameInterpolationModelLoader", "model_name"),
+    "foreground": ("WanStudioForegroundLoader", "model"),
 }
 # Nos de pacotes extras cuja presenca decide se um conjunto pode ser usado.
 EXTRA_NODES = sorted({node for entry in workflows.CATALOG.values() for node in entry.get("nodes", ())})
@@ -349,7 +356,14 @@ async def prepare_video(source, target, spec):
     # trabalharem juntas) so por ajuste de teste: workflows.SWAP_MIDDLE explica.
     middle = spec["middle"] if spec["middle"] is not None else \
         workflows.SWAP_MIDDLE if len(WORKERS) > 1 else 0
-    pieces = stitch.plan(frames, spec["chunk"], spec["overlap"], middle, workflows.SWAP_MIN_FRAMES)
+    # Duas cadeias que avancam, uma em cada GPU (stitch.chains explica): o padrao so com mais de
+    # uma GPU; um ajuste de teste pede as duas cadeias ate numa GPU so, para ver a emenda.
+    chains = spec.get("chains") or (workflows.SWAP_CHAINS if len(WORKERS) > 1 else 1)
+    if chains > 1 and not middle:
+        pieces = stitch.chains(frames, spec["chunk"], spec["overlap"], workflows.SWAP_MIN_FRAMES,
+                               anchor=spec.get("anchor", True))
+    else:
+        pieces = stitch.plan(frames, spec["chunk"], spec["overlap"], middle, workflows.SWAP_MIN_FRAMES)
     if not pieces:
         raise ValueError("o trecho do vídeo precisa ter pelo menos 1 segundo")
     total = pieces[-1]["start"] + pieces[-1]["length"]
@@ -449,6 +463,8 @@ async def download(app, worker, item, target):
 def complete(job, target):
     job.update(status="done", progress=1.0, stage="", url=f"/media/{target.name}",
                finished=time.time())
+    if PRICE_HOUR and job.get("started"):  # o tempo de maquina deste video, pelo preco dela
+        job["cost"] = round((job["finished"] - job["started"]) / 3600 * PRICE_HOUR, 3)
     discard(job)
     touch()
     save_jobs()
@@ -612,11 +628,14 @@ def waiting_tasks():
     """Tarefas a espera de um worker, na ordem em que devem rodar: job mais antigo primeiro."""
     jobs = sorted((job for job in JOBS.values() if job["status"] in SUBMITTED),
                   key=lambda job: job["created"])
-    # Um pedaco da troca de pessoa so pode comecar quando aquele de que ele continua terminou.
+    # Um pedaco da troca de pessoa so pode comecar quando aquele de que ele continua terminou
+    # (ou, no comeco de uma segunda cadeia, aquele de que ele copia a aparencia: a ancora).
     # E a restauracao de um job so comeca com todos os pedacos gerados e a memoria liberada.
+    def ready(job, task):
+        return all(source is None or job["tasks"][source]["status"] == "done"
+                   for source in (task["after"], task.get("anchor")))
     return [task for job in jobs for task in job.get("tasks", ()) if task["status"] == "pending"
-            and (job.get("restoring") if task.get("kind") == "restore"
-                 else task["after"] is None or job["tasks"][task["after"]]["status"] == "done")]
+            and (job.get("restoring") if task.get("kind") == "restore" else ready(job, task))]
 
 
 async def lend_gpu(worker):
@@ -665,16 +684,20 @@ async def start_task(app, worker, task):
         elif job["mode"] == "swap":
             names["video"] = await upload_file(
                 app, worker, f"wanstudio_{task['prefix']}.mp4", task["video"].read_bytes(), "video/mp4")
-            if task["after"] is not None:
-                # Os quadros do vizinho, ja gerados, que este pedaco repete para continuar dele.
-                source, first = stitch.copied(job["plan"], task["index"], job["overlap"])
+            if task["after"] is not None or task.get("anchor") is not None:
+                # Os quadros do vizinho, ja gerados, que este pedaco repete para continuar dele;
+                # no comeco de uma segunda cadeia, os da ancora, de que ele herda a aparencia.
+                source, first = (stitch.copied if task["after"] is not None else stitch.anchored)(
+                    job["plan"], task["index"], job["overlap"])
                 motion = job["workdir"] / f"continua_{task['index']:03d}.mp4"
                 await stitch.clip(frames_pattern(job, source, raw=True), first, job["overlap"], motion,
                                   job["fps"], reverse=task["reverse"], factor=raw_factor(job))
                 names["motion"] = await upload_file(
                     app, worker, f"wanstudio_{task['prefix']}_continua.mp4", motion.read_bytes(), "video/mp4")
             width, height = job["generate"]
-            spec = {**job, "width": width, "height": height, "length": task["length"]}
+            spec = {**job, "width": width, "height": height, "length": task["length"],
+                    # o comeco de uma segunda cadeia: os quadros recebidos sao de outro instante
+                    "anchored": task["after"] is None and task.get("anchor") is not None}
             if job.get("restore"):  # sai bruto: a restauracao e os intermediarios vem depois
                 spec.update(hd=False, factor=1)
         if not restore:
@@ -975,6 +998,7 @@ async def get_status(request):
         "enhancer": {"state": enhancer.state, "detail": enhancer.detail},
         "extras": extras_note(), "idle": idle_info(), "shutdown": STATE["shutdown"],
         "restart": STATE["restart"], "managed": MANAGED, "ram": memory_gb(), "now": time.time(),
+        "price_hour": PRICE_HOUR or None, "focus": "swap" if ONLY_SWAP else None,
     }
     try:
         sets = await catalog(app)
@@ -1097,6 +1121,8 @@ async def accept(request, batch, workdir):
             spec.pop("chunk_asked", None)
             if workflows.animate_unet(spec, sets[needed]["files"]) is None:
                 raise ValueError("ajuste de teste inválido")
+            if spec.get("whole") and not sets[needed]["files"].get("foreground"):
+                raise ValueError("ajuste de teste inválido: o modelo do recorte da pessoa inteira não está instalado")
             await prepare_video(video, workdir / "preparado.mp4", spec)
             spec["factor"] = workflows.smooth_factor(spec, sets[needed]["files"])
             video.unlink(missing_ok=True)
@@ -1278,7 +1304,8 @@ async def background(app):
     app["tasks"] = set()
     app["engine"] = asyncio.Lock()
     app["freeing"] = asyncio.Lock()
-    enhancer.start()
+    if not ONLY_SWAP:  # o modelo dele nem foi baixado: ficaria esperando para sempre
+        enhancer.start()
     await clear_queues(app)
     loops = [asyncio.create_task(poller(app))]
     loops += [asyncio.create_task(progress_listener(app, worker)) for worker in WORKERS]

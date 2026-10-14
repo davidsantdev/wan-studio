@@ -27,12 +27,16 @@ from pathlib import Path
 API = os.environ.get("KAGGLE_API_URL", "https://api.kaggle.com/v1").rstrip("/")
 TITLE = "Wan Studio"
 SLUG = "wan-studio"  # o Kaggle deriva o endereco do notebook do titulo
+# A sessao sem GPU (--cpu) tem notebook proprio no Kaggle: nao troca o de verdade, e as duas
+# podem estar ligadas ao mesmo tempo.
+CPU_TITLE, CPU_SLUG = "Wan Studio CPU", "wan-studio-cpu"
 MACHINE = "NvidiaTeslaT4"  # no Kaggle, a opcao "GPU T4 x2"
 TOKEN_PAGE = "https://www.kaggle.com/settings/api"
 
 FREE = Path(__file__).resolve().parent
 ROOT = FREE.parent
 NOTEBOOK = FREE / "wan_studio_free.ipynb"
+CPU_NOTEBOOK = FREE / "wan_studio_cpu.ipynb"
 PAIRING = FREE / "pairing.json"
 TOKEN_FILE = FREE / "kaggle_token.txt"
 OPENER = FREE / "abrir.html"  # fora de site/: contem o segredo de pareamento
@@ -143,7 +147,8 @@ def credentials(browser=True):
 def notebook_text():
     """O notebook como o servidor espera: celulas com o texto em uma so string, sem saidas."""
     if not NOTEBOOK.exists():
-        raise SystemExit(f"Não achei {NOTEBOOK.relative_to(ROOT)}. Rode: python free\\build.py")
+        hint = "python free\\build.py --cpu" if NOTEBOOK == CPU_NOTEBOOK else "python free\\build.py"
+        raise SystemExit(f"Não achei {NOTEBOOK.relative_to(ROOT)}. Rode: {hint}")
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     for cell in notebook.get("cells", []):
         if isinstance(cell.get("source"), list):
@@ -179,20 +184,24 @@ def patient_status(auth, user):
         return OFFLINE, ""
 
 
-def push(auth, user):
-    """Cria ou atualiza o notebook e manda executar tudo, com GPU e internet."""
+def push(auth, user, gpu=True):
+    """Cria ou atualiza o notebook e manda executar tudo, com GPU e internet. Sem `gpu`, a
+    sessao e so de CPU: nao gasta a cota de GPU e serve para conferir se o codigo roda (cada
+    passo leva minutos); o notebook precisa ter sido gerado para isso (veja --cpu)."""
     body = {
         "slug": f"{user}/{SLUG}", "newTitle": TITLE, "text": notebook_text(),
         "language": "python", "kernelType": "notebook", "isPrivate": True,
-        "enableGpu": True, "enableInternet": True, "machineShape": MACHINE,
+        "enableGpu": gpu, "enableInternet": True,
     }
+    if gpu:
+        body["machineShape"] = MACHINE
     try:
         reply = call(auth, "kernels.KernelsApiService", "SaveKernel", body)
     except KaggleError as error:
         if error.status != 400:
             raise
         reply = {"error": str(error)}
-    if reply.get("error") and "machine" in reply["error"].lower():
+    if reply.get("error") and "machine" in reply["error"].lower() and "machineShape" in body:
         # A conta nao aceita escolher a placa: deixa o Kaggle usar a GPU padrao.
         del body["machineShape"]
         reply = call(auth, "kernels.KernelsApiService", "SaveKernel", body)
@@ -220,22 +229,24 @@ def quota_line(auth):
 
 # ---------------------------------------------------------------- site
 
-def pairing_code(starting):
+def pairing_code(starting, extra=None):
     """Codigo que pareia o navegador com o notebook, para o site achar a sessao sozinho.
-    `starting` e a hora em que a GPU foi ligada (o site mostra "ligando" por um tempo)."""
+    `starting` e a hora em que a GPU foi ligada (o site mostra "ligando" por um tempo).
+    `extra`: mais campos para o site guardar (nuvem/ligar.py manda o endereco e a chave que
+    ligam a GPU do Modal pelo proprio site)."""
     try:
         pairing = json.loads(PAIRING.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None, ""
-    data = {"t": pairing["topic"], "k": pairing["key"]}
+    data = {"t": pairing["topic"], "k": pairing["key"], **(extra or {})}
     if starting:
         data["s"] = int(starting)
     code = base64.urlsafe_b64encode(json.dumps(data).encode()).decode().rstrip("=")
     return code, pairing.get("site", "")
 
 
-def open_site(starting, browser=True):
-    code, site = pairing_code(starting)
+def open_site(starting, browser=True, extra=None):
+    code, site = pairing_code(starting, extra)
     if site:
         target = f"{site.rstrip('/')}/#c={code}" if code else site
     else:
@@ -270,7 +281,7 @@ def wait_until_running(auth, user, seconds=900):
     return (OFFLINE if shown == OFFLINE else "QUEUED"), ""
 
 
-def start(auth, user, browser):
+def start(auth, user, browser, gpu=True):
     state, _ = session_status(auth, user)
     if state in ON:
         if state == "QUEUED":
@@ -282,8 +293,8 @@ def start(auth, user, browser):
         open_site(starting=int(time.time()), browser=browser)
         return 0
 
-    print("Enviando o notebook ao Kaggle…")
-    reply = push(auth, user)
+    print("Enviando o notebook ao Kaggle…" if gpu else "Enviando o notebook ao Kaggle, para uma sessão sem GPU…")
+    reply = push(auth, user, gpu)
     if reply.get("error"):
         print(f"\nO Kaggle recusou: {reply['error']}")
         print("Se a mensagem falar de internet ou GPU, verifique o telefone da conta em "
@@ -400,12 +411,29 @@ def early_outcome(auth, user, seconds=120):
     return "?", ""
 
 
+def use_cpu_session():
+    """Dai em diante tudo (enviar, estado, registro) fala da sessao sem GPU."""
+    global TITLE, SLUG, NOTEBOOK
+    TITLE, SLUG, NOTEBOOK = CPU_TITLE, CPU_SLUG, CPU_NOTEBOOK
+
+
 def main():
     parser = argparse.ArgumentParser(description="Liga a GPU do Wan Studio pela API do Kaggle.")
     parser.add_argument("comando", nargs="?", default="ligar", choices=("ligar", "status", "registro"))
     parser.add_argument("--sem-navegador", action="store_true", help="não abre o site ao terminar")
+    parser.add_argument("--cpu", action="store_true",
+                        help="liga uma sessão sem GPU (não gasta cota; só para conferir o código, com um "
+                             "notebook gerado por: python free/build.py --cpu)")
     parser.add_argument("--segundos", type=float, default=30, help="por quanto tempo acompanhar o registro")
     args = parser.parse_args()
+    if args.cpu:
+        use_cpu_session()
+
+    # O registro da GPU traz caracteres (barras de progresso) que o console do Windows, em
+    # cp1252/cp850, nao sabe escrever: sem isto o "registro" caia num UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
 
     print("Wan Studio · GPU gratuita do Kaggle\n")
     try:
@@ -419,7 +447,7 @@ def main():
             return show_status(auth, user)
         if args.comando == "registro":
             return show_log(auth, user, args.segundos)
-        return start(auth, user, browser=not args.sem_navegador)
+        return start(auth, user, browser=not args.sem_navegador, gpu=not args.cpu)
     except KaggleError as error:
         hint = " Gere um token novo e apague free\\kaggle_token.txt." if error.status == 401 else ""
         print(f"\nNão deu certo: {error}.{hint}")

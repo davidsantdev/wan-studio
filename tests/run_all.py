@@ -3,8 +3,9 @@
   python tests/run_all.py
 
 O que acontece:
-  1. os atalhos "Ligar GPU" rodam contra APIs simuladas do Kaggle (free/ligar.py) e do
-     Lightning AI (lightning/ligar.py; precisa de um bash, no Windows o do Git);
+  1. os atalhos "Ligar GPU" rodam contra APIs simuladas do Kaggle (free/ligar.py), do
+     Lightning AI (lightning/ligar.py; precisa de um bash, no Windows o do Git) e do Modal
+     (nuvem/ligar.py, com a sessao de verdade subindo aqui sobre um ComfyUI simulado);
   2. a emenda dos pedacos da troca de pessoa roda com o ffmpeg de verdade (stitch_test.py);
   3. o motor do servidor roda com dois ComfyUI simulados, pela API (engine_test.py);
   4. a pilha do notebook sobe localmente (launcher de verdade + dois ComfyUI simulados) e um
@@ -115,6 +116,8 @@ def main():
     results["ligar a GPU"] = subprocess.run([sys.executable, str(HERE / "ligar_test.py")]).returncode
     # O mesmo no Lightning AI: API simulada, com os comandos remotos rodando num bash daqui.
     results["ligar no Lightning"] = subprocess.run([sys.executable, str(HERE / "lightning_test.py")]).returncode
+    # A GPU rapida (Modal): um modal de mentira, e a sessao de verdade com o ComfyUI simulado.
+    results["ligar no Modal"] = subprocess.run([sys.executable, str(HERE / "nuvem_test.py")]).returncode
     # A emenda dos pedacos (ffmpeg) e o motor com duas GPUs simuladas, pela API.
     results["emenda"] = subprocess.run([sys.executable, str(HERE / "stitch_test.py")]).returncode
     # O fechamento do recorte da pessoa (a parte do no do ComfyUI que e so conta; precisa do numpy).
@@ -151,7 +154,7 @@ def main():
     print()
     for name, code in results.items():
         print(f"{name}: {'ok' if code == 0 else 'FALHOU'}")
-    return 1 if any(results.values()) or len(results) < 8 else 0
+    return 1 if any(results.values()) or len(results) < 9 else 0
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Monta os grafos do ComfyUI (formato API) para o Wan 2.2."""
 
+import os
 import random
 
 TEXT_ENCODER = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
@@ -50,15 +51,21 @@ CATALOG = {
                      "upscaler": ("upscale", "RealESRGAN_x2plus.pth"),
                      "interpolator": ("frame_interpolation", "rife_v4.25.safetensors"),
                      "restorer": ("unet", "seedvr2_3b_fp8_e4m3fn.safetensors"),
-                     "restorer_vae": ("vae", "seedvr2_ema_vae_fp16.safetensors")},
+                     "restorer_vae": ("vae", "seedvr2_ema_vae_fp16.safetensors"),
+                     # O recorte da pessoa inteira (`whole`): a pasta do BiRefNet em models/BiRefNet.
+                     "foreground": ("foreground", "BiRefNet-portrait")},
         # Outras compressoes do mesmo modelo, se instaladas: um pedido de teste escolhe pelo nome.
+        # A "int8_convrot" (a do proprio ComfyUI) e a candidata a padrao na T4: mais fiel que o
+        # GGUF Q4 e, com os nucleos de INT8 ligados (PyTorch de CUDA 13), mais rapida. A medir.
         "alternatives": ("Wan2.2-Animate-14B-Q4_K_S.gguf", "Wan2.2-Animate-14B-Q4_K_M.gguf",
                          "Wan2.2-Animate-14B-Q5_K_M.gguf", "Wan2.2-Animate-14B-Q6_K.gguf",
-                         "Wan2.2-Animate-14B-Q8_0.gguf"),
+                         "Wan2.2-Animate-14B-Q8_0.gguf", "wan2.2_animate_14B_int8_convrot.safetensors"),
         # Nos que precisam existir: o Animate nativo, os pre-processadores do Kijai e o recorte
         # da pessoa do proprio Wan Studio (vm/nodes).
         "nodes": ("WanAnimateToVideo", "PoseAndFaceDetection", "DrawViTPose",
-                  "DownloadAndLoadSAM2Model", "WanStudioPersonMask"),
+                  "DownloadAndLoadSAM2Model", "WanStudioPersonMask", "WanStudioFitReference",
+                  "WanStudioWindow", "WanStudioPaste", "WanStudioWholePerson", "WanStudioHeadWindow",
+                  "WanStudioFacePaste"),
     },
 }
 
@@ -105,6 +112,12 @@ SWAP_OVERLAP = 5       # quadros que um pedaco copia do vizinho para continuar d
 # Quadros do pedaco de partida no meio do video (0: nao ha; o video e gerado do comeco). O
 # servidor ainda sabe fazer isso, para medir; os resultados estao acima.
 SWAP_MIDDLE = 0
+# Em quantas cadeias de pedacos o video e gerado quando ha mais de uma GPU: 1 (so avancando, o
+# que foi medido) ou 2 (duas que avancam ao mesmo tempo, uma em cada GPU; a segunda parte de
+# quadros ja gerados do primeiro pedaco: app/stitch.py `chains`). Pelo plano, um video de 23 s
+# cai a uns 57% do tempo. O 2 so vira padrao depois de conferido na GPU: falta ver se a emenda
+# entre as cadeias aparece.
+SWAP_CHAINS = 1
 SWAP_MIN_FRAMES = 17
 SWAP_MAX_SECONDS = 60
 # A LoRA lightx2v foi destilada para 4 passos. "rapida" gera com 59% dos pixels (metade do
@@ -139,7 +152,11 @@ SWAP_HD_SIDE = 720                  # com a ampliacao: o lado menor do arquivo f
 SWAP_HD_CHUNK = 49
 ANIMATE_PROMPT = "The person in the video is performing the action"
 # O no do SAM2 acrescenta "-fp16" ao nome do arquivo quando a precisao e fp16.
-SAM2 = {"model": "sam2.1_hiera_base_plus.safetensors", "device": "cuda", "precision": "fp16"}
+# (WAN_SAM2_DEVICE=cpu: so para rodar o grafo numa maquina sem GPU, que e como o codigo novo e
+# conferido de graca numa sessao de CPU do Kaggle; la a precisao e fp32.)
+SAM2_DEVICE = os.environ.get("WAN_SAM2_DEVICE", "cuda")
+SAM2 = {"model": "sam2.1_hiera_base_plus.safetensors", "device": SAM2_DEVICE,
+        "precision": "fp16" if SAM2_DEVICE == "cuda" else "fp32"}
 SAM2_MODELS = {"base": SAM2["model"], "grande": "sam2.1_hiera_large.safetensors"}
 # Como o recorte da pessoa e pedido ao SAM2 (vm/nodes/wan_studio explica cada um).
 MASK_METHODS = ("juntos", "caixas", "pontos", "partes", "caixa")
@@ -151,6 +168,29 @@ MASK_COVERS = ("contorno", "caixa")
 # tranca voltava no fim do video); so viram padrao depois de conferidos na GPU.
 MASK_BOXES = ("justa", "larga")
 MASK_GROW = 10
+# Como a imagem da pessoa entra no quadro de geracao: "pad" a poe inteira, com faixas pretas
+# onde a proporcao difere (o padrao, medido); "crop" a recorta antes na caixa da pessoa, na
+# proporcao do quadro (vm/nodes/wan_studio `fit_crop`), para ela nao ficar pequena. O "crop" so
+# vira padrao depois de conferido na GPU.
+REF_FITS = ("pad", "crop")
+# A janela na pessoa: o Animate gera so o retangulo do quadro em que a pessoa esta (com cenario
+# em volta), e os quadros gerados voltam para o video so onde o recorte dela manda; o resto fica
+# com os pixels do video de origem (vm/nodes/wan_studio, WanStudioWindow e WanStudioPaste). O
+# passo custa mais que proporcionalmente aos pixels (na T4, 1,5 vez os pixels levou 1,9 vez o
+# tempo), entao numa cena em que a pessoa ocupa metade do quadro o pedaco sai em bem menos da
+# metade do tempo; quando ela enche o quadro, nada muda. So vira padrao depois de conferida na GPU.
+SWAP_WINDOW = False
+# A pessoa inteira: o recorte do SAM2 e completado pelo de um modelo de recorte de primeiro
+# plano (BiRefNet), so no que esta ligado a ele (vm/nodes/wan_studio, WanStudioWholePerson). No
+# exemplo oficial as trancas da pessoa original ficavam fora do recorte e voltavam no video
+# trocado; o BiRefNet as pega em todos os quadros. So vira padrao depois de conferido na GPU.
+SWAP_WHOLE = False
+# O rosto em detalhe: depois de gerar o pedaco, uma segunda passada do Animate so na cabeca,
+# ampliada ate 3 vezes, com a cabeca da imagem da pessoa como referencia (vm/nodes/wan_studio,
+# WanStudioHeadWindow). Num plano aberto o rosto gerado em 480p tem 60 a 90 px, e e ai que a
+# semelhanca com a foto se perde. Custa uns 25 a 55% a mais de tempo quando roda; com o rosto
+# ja grande (num close) ela nao roda. So vira padrao depois de conferido na GPU.
+SWAP_FACE = False
 
 
 def required_set(model, mode):
@@ -318,7 +358,7 @@ def _resolve_swap(params, has_person, has_video):
     size = expert.get("size")
     if size is not None:
         ok = (isinstance(size, list) and len(size) == 2
-              and all(isinstance(side, int) and 256 <= side <= 1280 and side % 16 == 0 for side in size))
+              and all(isinstance(side, int) and 128 <= side <= 1280 and side % 16 == 0 for side in size))
         if not ok:
             raise ValueError(bad)
     if chunk % 4 != 1 or overlap > chunk - 12 or expert.get("onnx", "gpu") not in ("cpu", "gpu"):
@@ -328,6 +368,8 @@ def _resolve_swap(params, has_person, has_video):
     if expert.get("smooth", SMOOTH_METHODS[0]) not in SMOOTH_METHODS:
         raise ValueError(bad)
     if expert.get("cover", MASK_COVERS[0]) not in MASK_COVERS or expert.get("box", MASK_BOXES[0]) not in MASK_BOXES:
+        raise ValueError(bad)
+    if expert.get("ref", REF_FITS[0]) not in REF_FITS:
         raise ValueError(bad)
     fluid = bool(params.get("fluid", False))
     if expert.get("hd_method", HD_METHODS[0]) not in HD_METHODS:
@@ -367,6 +409,12 @@ def _resolve_swap(params, has_person, has_video):
         "mask": expert.get("mask", MASK_METHODS[0]),
         "cover": expert.get("cover", MASK_COVERS[0]),
         "box": expert.get("box", MASK_BOXES[0]),
+        "ref": expert.get("ref", REF_FITS[0]),
+        "window": bool(expert.get("window", SWAP_WINDOW)),
+        "whole": bool(expert.get("whole", SWAP_WHOLE)),
+        "face": bool(expert.get("face", SWAP_FACE)),
+        # Cenario em volta da pessoa, na janela, em pixels (None: o padrao do no).
+        "window_margin": _number(expert, "window_margin", None, 16, 512, bad, int),
         "grow": _number(expert, "grow", MASK_GROW, 0, 64, bad, int),
         # Fecha o recorte depois do SAM2 (vm/nodes/wan_studio explica); desligar e so para medir.
         "seal": bool(expert.get("seal", True)),
@@ -378,6 +426,10 @@ def _resolve_swap(params, has_person, has_video):
         "preview": bool(expert.get("preview", False)),
         # None: o servidor decide pelo numero de GPUs; 0: sem pedaco do meio, todos avancam.
         "middle": _number(expert, "middle", None, 0, chunk, bad, int),
+        # Cadeias de pedacos (None: SWAP_CHAINS, se houver mais de uma GPU) e se a segunda
+        # parte de quadros do primeiro pedaco (a ancora) ou so da imagem da pessoa.
+        "chains": _number(expert, "chains", None, 1, 2, bad, int),
+        "anchor": bool(expert.get("anchor", True)),
         "width": 0,
         "height": 0,
         "length": 0,
@@ -606,21 +658,16 @@ def _blocky_mask(g, mask, width, height, grow=MASK_GROW):
     return [g.add("ImageToMask", image=[full, 0], channel="red"), 0]
 
 
-def _animate_inputs(g, files, frames, width, height, replace, onnx, method=MASK_METHODS[0], sam_model="base",
-                    cover="contorno", box="justa", grow=MASK_GROW, seal=True):
-    """Extrai do video o que guia o Animate: pose, rosto e (na troca) fundo e mascara."""
+def _detector(g, files, onnx):
+    """O carregador dos modelos de pose e de pessoa (ViTPose e YOLO)."""
     device = "CUDAExecutionProvider" if onnx == "gpu" else "CPUExecutionProvider"
-    detector = g.add("OnnxDetectionModelLoader", vitpose_model=files["vitpose"],
-                     yolo_model=files["yolo"], onnx_device=device)
-    detected = g.add("PoseAndFaceDetection", model=[detector, 0], images=frames,
-                     width=width, height=height)
-    pose = g.add("DrawViTPose", pose_data=[detected, 0], width=width, height=height,
-                 retarget_padding=16, body_stick_width=-1, hand_stick_width=-1, draw_head=True)
-    g.stage("analisando o vídeo", detector, detected, pose)
-    driving = {"face_video": [detected, 1], "pose_video": [pose, 0]}
-    if not replace:
-        return driving
+    return g.add("OnnxDetectionModelLoader", vitpose_model=files["vitpose"],
+                 yolo_model=files["yolo"], onnx_device=device)
 
+
+def _person_mask(g, files, frames, detected, width, height, method, sam_model, cover, box, grow, seal, whole=False):
+    """O recorte da pessoa em cada quadro do pedaco, como vai para o Animate. Com `whole`, o do
+    SAM2 e completado pelo do modelo de primeiro plano (`SWAP_WHOLE`)."""
     # O SAM2 recebe os pontos do corpo (da deteccao de pose) em alguns quadros do pedaco, mais
     # a caixa da pessoa no primeiro (saida 3), e a acompanha pelos demais: e o metodo do
     # pre-processamento oficial. So com a caixa do primeiro quadro, num teste o recorte pegou
@@ -630,13 +677,103 @@ def _animate_inputs(g, files, frames, width, height, replace, onnx, method=MASK_
     person = g.add("WanStudioPersonMask", sam2_model=[sam, 0], images=frames, pose_data=[detected, 0],
                    method=method, key_frames=6, bboxes=[detected, 3], cover=cover, box=box, seal=seal)
     g.stage("recortando a pessoa", sam, person)
+    if whole and files.get("foreground"):
+        loader = g.add("WanStudioForegroundLoader", model=files["foreground"], device=SAM2_DEVICE)
+        person = g.add("WanStudioWholePerson", images=frames, mask=[person, 0], model=[loader, 0],
+                       pose_data=[detected, 0])
+        g.stage("recortando a pessoa", loader, person)
     # O retangulo ja vem pronto do no; o contorno ainda e engordado e quadriculado aqui.
-    mask = [person, 0] if cover == "caixa" else _blocky_mask(g, [person, 0], width, height, grow)
+    return [person, 0] if cover == "caixa" else _blocky_mask(g, [person, 0], width, height, grow)
+
+
+def _animate_inputs(g, files, frames, width, height, replace, onnx, method=MASK_METHODS[0], sam_model="base",
+                    cover="contorno", box="justa", grow=MASK_GROW, seal=True, detector=None, whole=False):
+    """Extrai do video o que guia o Animate: pose, rosto e (na troca) fundo e mascara.
+    `detector` e um carregador ja no grafo (o da imagem da pessoa), para nao carregar dois."""
+    if detector is None:
+        detector = _detector(g, files, onnx)
+    detected = g.add("PoseAndFaceDetection", model=[detector, 0], images=frames,
+                     width=width, height=height)
+    pose = g.add("DrawViTPose", pose_data=[detected, 0], width=width, height=height,
+                 retarget_padding=16, body_stick_width=-1, hand_stick_width=-1, draw_head=True)
+    g.stage("analisando o vídeo", detector, detected, pose)
+    driving = {"face_video": [detected, 1], "pose_video": [pose, 0]}
+    if not replace:
+        return driving
+
+    mask = _person_mask(g, files, frames, detected, width, height, method, sam_model, cover, box, grow, seal, whole)
     black = g.add("EmptyImage", width=width, height=height, batch_size=1, color=0)
     background = g.add("ImageCompositeMasked", destination=frames, source=[black, 0], x=0, y=0,
                        resize_source=False, mask=mask)
     driving.update(background_video=[background, 0], character_mask=mask)
     return driving
+
+
+def _face_pass(g, spec, files, model, positive, negative, vae, vision, frames, driving, mask, person, motion=None):
+    """A segunda passada do rosto em detalhe (`SWAP_FACE`) sobre os quadros ja gerados
+    (`frames`): a cabeca e ampliada, refeita pelo Animate com o recorte da cabeca da imagem da
+    pessoa como referencia e posta de volta. `mask` e o recorte da pessoa no quadro inteiro;
+    `motion`, os quadros de que o pedaco continua. Devolve (quadros, sampler)."""
+    detected = driving["face_video"][0]
+    detector = g.nodes[detected]["inputs"]["model"][0]
+    head = g.add("WanStudioHeadWindow", images=frames, pose_data=[detected, 0], mask=mask,
+                 **({"motion": motion} if motion else {}))
+    side, size = [head, 6], [head, 7]
+    found = g.add("PoseAndFaceDetection", model=[detector, 0], images=[person, 0], width=size, height=size)
+    face = g.add("WanStudioFitReference", image=[person, 0], pose_data=[found, 0], bboxes=[found, 3],
+                 width=size, height=size, region="cabeca")
+    reference = g.add("ResizeAndPadImage", image=[face, 0], target_width=size, target_height=size,
+                      padding_color="black", interpolation="lanczos")
+    seen = g.add("CLIPVisionEncode", clip_vision=[vision, 0], image=[reference, 0], crop="none")
+    pose = g.add("DrawViTPose", pose_data=[head, 2], width=size, height=size, retarget_padding=16,
+                 body_stick_width=-1, hand_stick_width=-1, draw_head=True)
+    black = g.add("EmptyImage", width=size, height=size, batch_size=1, color=0)
+    background = g.add("ImageCompositeMasked", destination=[head, 0], source=[black, 0], x=0, y=0,
+                       resize_source=False, mask=[head, 1])
+    animate = g.add("WanAnimateToVideo", positive=[positive, 0], negative=[negative, 0], vae=[vae, 0],
+                    width=size, height=size, length=spec["length"], batch_size=1,
+                    continue_motion_max_frames=spec["overlap"], video_frame_offset=0,
+                    clip_vision_output=[seen, 0], reference_image=[reference, 0], face_video=driving["face_video"],
+                    pose_video=[pose, 0], background_video=[background, 0], character_mask=[head, 1],
+                    **({"continue_motion": [head, 3]} if motion else {}))
+    sampler = g.add("KSampler", model=[model, 0], seed=spec["seed"], steps=spec["steps"], cfg=1.0,
+                    sampler_name="euler", scheduler="simple", positive=[animate, 0],
+                    negative=[animate, 1], latent_image=[animate, 2], denoise=1.0)
+    trimmed = g.add("TrimVideoLatent", samples=[sampler, 0], trim_amount=[animate, 3])
+    decoded = g.add("VAEDecode", samples=[trimmed, 0], vae=[vae, 0])
+    small = g.add("ImageScale", image=[decoded, 0], upscale_method="area", width=side, height=side, crop="disabled")
+    # Com o rosto ja grande a cabeca nao e refeita: o no de colar nem pede o resultado.
+    pasted = g.add("WanStudioFacePaste", images=frames, active=[head, 8], x=[head, 4], y=[head, 5],
+                   patch=[small, 0], mask=[head, 9])
+    g.stage("refazendo o rosto", head, found, face, reference, seen, pose, black, background, animate)
+    g.stage("finalizando", trimmed, decoded, small, pasted)
+    return pasted, sampler
+
+
+def _window_inputs(g, files, frames, width, height, spec, detector=None, motion=None):
+    """O mesmo que `_animate_inputs` na troca de pessoa, com a janela (`SWAP_WINDOW`): a pose e o
+    recorte sao achados no quadro inteiro, como sempre, e dai em diante tudo e cortado no
+    retangulo em que a pessoa esta. O tamanho dele so o grafo sabe: quem precisa de largura e
+    altura liga-se as saidas 6 e 7 do no da janela, que esta funcao devolve junto com o que guia
+    o Animate. `motion`: os quadros de que o pedaco continua, que sao cortados do mesmo jeito."""
+    if detector is None:
+        detector = _detector(g, files, spec["onnx"])
+    detected = g.add("PoseAndFaceDetection", model=[detector, 0], images=frames, width=width, height=height)
+    g.stage("analisando o vídeo", detector, detected)
+    mask = _person_mask(g, files, frames, detected, width, height, spec["mask"], spec["sam"],
+                        spec.get("cover", MASK_COVERS[0]), spec.get("box", MASK_BOXES[0]),
+                        spec.get("grow", MASK_GROW), spec.get("seal", True), spec.get("whole", False))
+    cut = g.add("WanStudioWindow", images=frames, mask=mask, pose_data=[detected, 0],
+                **({"motion": motion} if motion else {}),
+                **({"margin": spec["window_margin"]} if spec.get("window_margin") else {}))
+    pose = g.add("DrawViTPose", pose_data=[cut, 2], width=[cut, 6], height=[cut, 7],
+                 retarget_padding=16, body_stick_width=-1, hand_stick_width=-1, draw_head=True)
+    black = g.add("EmptyImage", width=[cut, 6], height=[cut, 7], batch_size=1, color=0)
+    background = g.add("ImageCompositeMasked", destination=[cut, 0], source=[black, 0], x=0, y=0,
+                       resize_source=False, mask=[cut, 1])
+    g.stage("recortando a pessoa", cut, pose, black, background)
+    return {"face_video": [detected, 1], "pose_video": [pose, 0], "background_video": [background, 0],
+            "character_mask": [cut, 1]}, cut
 
 
 def _smooth(g, spec, files, images):
@@ -699,7 +836,7 @@ def _mask_preview(g, spec, files, prefix, video):
     parts = g.add("GetVideoComponents", video=[g.add("LoadVideo", file=video), 0])
     driving = _animate_inputs(g, files, [parts, 0], width, height, True, spec["onnx"], spec["mask"], spec["sam"],
                               spec.get("cover", MASK_COVERS[0]), spec.get("box", MASK_BOXES[0]), spec.get("grow", MASK_GROW),
-                              spec.get("seal", True))
+                              spec.get("seal", True), whole=spec.get("whole", False))
     red = g.add("EmptyImage", width=width, height=height, batch_size=1, color=0xFF2020)
     painted = g.add("ImageCompositeMasked", destination=[parts, 0], source=[red, 0], x=0, y=0,
                     resize_source=False, mask=driving["character_mask"])
@@ -732,10 +869,20 @@ def _build_animate(spec, files, positive, negative, prefix, person_image, video,
                       strength_model=1.0)
     model = g.add("ModelSamplingSD3", model=[model, 0], shift=8.0)
 
-    # A pessoa entra inteira: bordas pretas em vez de corte quando a proporcao difere.
+    # A pessoa entra inteira: bordas pretas em vez de corte quando a proporcao difere. Com
+    # `ref=crop`, a imagem e recortada antes na caixa da pessoa, na proporcao do quadro: ela
+    # ocupa mais dele, e as faixas so aparecem onde a imagem acaba.
     person = g.add("LoadImage", image=person_image)
-    reference = g.add("ResizeAndPadImage", image=[person, 0], target_width=width,
+    fitted, detector, framed = [person, 0], None, []
+    if spec.get("ref") == "crop":
+        detector = _detector(g, files, spec["onnx"])
+        found = g.add("PoseAndFaceDetection", model=[detector, 0], images=[person, 0], width=width, height=height)
+        fitted = [g.add("WanStudioFitReference", image=[person, 0], pose_data=[found, 0], bboxes=[found, 3],
+                        width=width, height=height), 0]
+        framed.append((fitted[0], "width", "height"))
+    reference = g.add("ResizeAndPadImage", image=fitted, target_width=width,
                       target_height=height, padding_color="black", interpolation="lanczos")
+    framed.append((reference, "target_width", "target_height"))
     vision = g.add("CLIPVisionLoader", clip_name=files["clip_vision"])
     vision_out = g.add("CLIPVisionEncode", clip_vision=[vision, 0], image=[reference, 0],
                        crop="none")
@@ -745,15 +892,26 @@ def _build_animate(spec, files, positive, negative, prefix, person_image, video,
 
     source = g.add("LoadVideo", file=video)
     parts = g.add("GetVideoComponents", video=[source, 0])
-    driving = _animate_inputs(g, files, [parts, 0], width, height, spec["replace"], spec["onnx"],
-                              spec["mask"], spec["sam"], spec.get("cover", MASK_COVERS[0]),
-                              spec.get("box", MASK_BOXES[0]), spec.get("grow", MASK_GROW), spec.get("seal", True))
-
-    if motion:
-        previous = g.add("GetVideoComponents", video=[g.add("LoadVideo", file=motion), 0])
-        driving["continue_motion"] = [previous, 0]
+    cut, size, previous = None, (width, height), None
+    if spec.get("window") and spec["replace"]:
+        previous = [g.add("GetVideoComponents", video=[g.add("LoadVideo", file=motion), 0]), 0] if motion else None
+        driving, cut = _window_inputs(g, files, [parts, 0], width, height, spec, detector, previous)
+        size = ([cut, 6], [cut, 7])
+        if previous:
+            driving["continue_motion"] = [cut, 3]
+        # A imagem da pessoa entra no formato da janela, e nao no do quadro.
+        for node, wide, tall in framed:
+            g.nodes[node]["inputs"].update({wide: size[0], tall: size[1]})
+    else:
+        driving = _animate_inputs(g, files, [parts, 0], width, height, spec["replace"], spec["onnx"],
+                                  spec["mask"], spec["sam"], spec.get("cover", MASK_COVERS[0]),
+                                  spec.get("box", MASK_BOXES[0]), spec.get("grow", MASK_GROW), spec.get("seal", True),
+                                  detector, whole=spec.get("whole", False))
+        if motion:
+            previous = [g.add("GetVideoComponents", video=[g.add("LoadVideo", file=motion), 0]), 0]
+            driving["continue_motion"] = previous
     animate = g.add("WanAnimateToVideo", positive=[pos, 0], negative=[neg, 0], vae=[vae, 0],
-                    width=width, height=height, length=length, batch_size=1,
+                    width=size[0], height=size[1], length=length, batch_size=1,
                     continue_motion_max_frames=spec["overlap"], video_frame_offset=0,
                     clip_vision_output=[vision_out, 0], reference_image=[reference, 0], **driving)
     g.stage("preparando a geração", animate)
@@ -764,10 +922,24 @@ def _build_animate(spec, files, positive, negative, prefix, person_image, video,
     trimmed = g.add("TrimVideoLatent", samples=[sampler, 0], trim_amount=[animate, 3])
     decoded = g.add("VAEDecode", samples=[trimmed, 0], vae=[vae, 0])
     images = decoded
+    if cut:
+        # Os quadros gerados voltam para o lugar deles no video. Quando o pedaco continua de um
+        # vizinho no tempo, a cor deles e trazida a dele ali mesmo, dentro do recorte (no comeco
+        # de uma segunda cadeia os quadros recebidos sao de outro instante: nao ha o que comparar).
+        match = {"previous": [cut, 3], "overlap": spec["overlap"]} if motion and not spec.get("anchored") else {}
+        images = g.add("WanStudioPaste", images=[parts, 0], patch=[decoded, 0], mask=[cut, 1],
+                       x=[cut, 4], y=[cut, 5], **match)
+        g.stage("finalizando", images)
+    samplers = [sampler]
+    if spec.get("face") and spec["replace"]:
+        whole_mask = g.nodes[cut]["inputs"]["mask"] if cut else driving["character_mask"]
+        images, second = _face_pass(g, spec, files, model, pos, neg, vae, vision, [images, 0], driving,
+                                    whole_mask, person, previous)
+        samplers.append(second)
     # A restauracao (SeedVR2) nao entra aqui: e outro grafo, rodado depois (`build_restore`).
     if hd_method(spec, files) == "esrgan":
         upscaler = g.add("UpscaleModelLoader", model_name=files["upscaler"])
-        images = g.add("ImageUpscaleWithModel", upscale_model=[upscaler, 0], image=[decoded, 0])
+        images = g.add("ImageUpscaleWithModel", upscale_model=[upscaler, 0], image=[images, 0])
         # O ComfyUI le os modelos logo no comeco: o rotulo vale para o no que os usa.
         g.stage("carregando o modelo", upscaler)
         g.stage("ampliando", images)
@@ -777,4 +949,4 @@ def _build_animate(spec, files, positive, negative, prefix, person_image, video,
     else:
         save = g.add("SaveImage", images=[images, 0], filename_prefix=f"wanstudio/{prefix}")
     g.stage("finalizando", decoded, save)
-    return g.nodes, [sampler], g.stages
+    return g.nodes, samplers, g.stages

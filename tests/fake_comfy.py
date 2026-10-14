@@ -29,7 +29,7 @@ PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 
 FIELDS = {"UNETLoader": "unet_name", "UnetLoaderGGUF": "unet_name", "LoraLoaderModelOnly": "lora_name",
           "VAELoader": "vae_name", "CLIPLoader": "clip_name", "CLIPVisionLoader": "clip_name",
           "OnnxDetectionModelLoader": "vitpose_model", "UpscaleModelLoader": "model_name",
-          "FrameInterpolationModelLoader": "model_name"}
+          "FrameInterpolationModelLoader": "model_name", "WanStudioForegroundLoader": "model"}
 INSTALLED = {
     "UNETLoader": ["wan2.2_ti2v_5B_fp16.safetensors"],
     "UnetLoaderGGUF": [],
@@ -40,11 +40,13 @@ INSTALLED = {
     "OnnxDetectionModelLoader": [],
     "UpscaleModelLoader": [],
     "FrameInterpolationModelLoader": [],
+    "WanStudioForegroundLoader": [],
 }
 # Nos de pacotes extras: existem desde o inicio (sao instalados antes de o ComfyUI subir);
 # o que chega depois sao os arquivos de modelo.
 EXTRA_NODES = {"WanAnimateToVideo", "PoseAndFaceDetection", "DrawViTPose", "DownloadAndLoadSAM2Model",
-               "WanStudioPersonMask"}
+               "WanStudioPersonMask", "WanStudioFitReference", "WanStudioWindow", "WanStudioPaste",
+               "WanStudioWholePerson", "WanStudioHeadWindow", "WanStudioFacePaste"}
 # Quanto cada no "demora", para o teste enxergar as etapas.
 SLOW_NODES = {"PoseAndFaceDetection": 2.5, "WanStudioPersonMask": 2.5}
 uploaded = {}  # nome -> conteudo dos arquivos enviados
@@ -59,6 +61,7 @@ EXTRA_SETS = {
         "OnnxDetectionModelLoader": ["vitpose-l-wholebody.onnx", "yolov10m.onnx"],
         "UpscaleModelLoader": ["RealESRGAN_x2plus.pth"],
         "FrameInterpolationModelLoader": ["rife_v4.25.safetensors"],
+        "WanStudioForegroundLoader": ["BiRefNet-portrait"],
     },
     # O mesmo modelo sem compressao GGUF: o que o instalador baixa numa placa de 24 GB ou mais.
     "animate_fp8": {"UNETLoader": ["Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors"]},
@@ -167,6 +170,7 @@ async def execute(pid, graph, client_id):
             # Um arquivo por imagem do lote: um pedaco da troca de pessoa grava todos os quadros.
             count = max([other["inputs"]["length"] for other in graph.values()
                          if other["class_type"] == "WanAnimateToVideo"] or [0])
+            # (o rosto em detalhe poe um segundo Animate no grafo, com o mesmo numero de quadros)
             if not count:  # restauracao de um pedaco ja gerado: tantos quadros quantos o video enviado tem
                 count = max([video_frames(other["inputs"]["file"]) for other in graph.values()
                              if other["class_type"] == "LoadVideo"] or [1])

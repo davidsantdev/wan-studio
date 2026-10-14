@@ -27,6 +27,7 @@ BIG_SERVER, BIG_FAKE = "http://127.0.0.1:8094", "http://127.0.0.1:8192"
 failures = []
 
 sys.path.insert(0, str(HERE.parent / "app"))
+import stitch  # noqa: E402
 import workflows  # noqa: E402
 
 
@@ -169,7 +170,9 @@ def scenarios():
     status = get("/api/status")
     check("G0b depois disso nenhuma GPU fica aquecendo e o melhorador de prompt recebe a GPU de volta",
           status.get("warming") == 0 and status["enhancer"]["state"] == "ready", str((status.get("warming"), status["enhancer"]["state"])))
-    check("G1 duas GPUs aparecem no estado", status["workers"] == 2 and status["gpu"].startswith("2× Tesla T4"), status["gpu"])
+    check("G1 duas GPUs aparecem no estado, e a sessao oferece todos os modos",
+          status["workers"] == 2 and status["gpu"].startswith("2× Tesla T4") and "focus" in status and status["focus"] is None,
+          f"{status['gpu']} {status.get('focus')}")
 
     # ---- troca de pessoa de 10 s na qualidade rapida: 8 quadros gerados por segundo (os
     # outros 8 sao interpolados em cada pedaco), 3 pedacos, do meio para as pontas, nas duas GPUs
@@ -256,6 +259,79 @@ def scenarios():
           and all(node(graph, "FrameInterpolate") is None for graph in fresh)
           and frames_of(done, "dezesseis.mp4") == (160, "16/1"), str(sorted(item["length"] for item in pieces)))
     call(SERVER + f"/api/jobs/{reply['jobs'][0]['id']}", method="DELETE")
+
+    # ---- duas cadeias que avancam, uma em cada GPU: a segunda parte de quadros do primeiro
+    # pedaco (a ancora) e so comeca depois dele; na emenda entre as duas ha mistura
+    def motions(graph):
+        return [item["inputs"]["file"] for item in graph if item["class_type"] == "LoadVideo"
+                and "_continua" in item["inputs"]["file"]]
+    for anchor, label in ((True, "G12d"), (False, "G12e")):
+        before = [len(graphs(base)) for base in FAKES]
+        code, reply = generate({**swap, "expert": {"fps": 16, "chunk": 49, "chains": 2, "anchor": anchor}},
+                               start_image=person, video=long)
+        made = reply["jobs"][0] if code == 200 else {}
+        done = wait_job(made.get("id"))
+        per_gpu = [graphs(base)[start:] for base, start in zip(FAKES, before)]
+        fresh = per_gpu[0] + per_gpu[1]
+        plan = stitch.chains(160, 49, 5, anchor=anchor)
+        second = next(index for index, piece in enumerate(plan) if piece.get("blend"))
+        lengths = sorted(node(graph, "WanAnimateToVideo")["length"] for graph in fresh)
+        fed = sorted(name.rsplit("_", 2)[-2] for graph in fresh for name in motions(graph))
+        expected = [f"{index:03d}" for index in range(1, len(plan)) if anchor or index != second]
+        check(f"{label} duas cadeias {'com' if anchor else 'sem'} ancora: os pedacos do plano nas duas GPUs, "
+              f"{'todos menos o primeiro' if anchor else 'so os que continuam de um vizinho'} recebendo quadros "
+              "ja gerados, e o video inteiro no fim",
+              bool(done) and done["status"] == "done" and made.get("chunks") == len(plan)
+              and lengths == sorted(piece["length"] for piece in plan) and fed == expected
+              and min(len(per_gpu[0]), len(per_gpu[1])) >= 2 and frames_of(done, f"cadeias_{label}.mp4") == (160, "16/1"),
+              f"{len(per_gpu[0])} + {len(per_gpu[1])} pedacos {lengths}; com quadros do vizinho: {fed}")
+        call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+    code, reply = generate({**swap, "expert": {"chains": 3}}, start_image=person, video=long)
+    check("G12f numero de cadeias invalido: recusado", code == 400, str(reply)[:80])
+
+    # ---- a pessoa inteira (ajuste de teste): o recorte do SAM2 completado pelo do BiRefNet
+    before = [len(graphs(base)) for base in FAKES]
+    code, reply = generate({**swap, "duration": 3, "expert": {"whole": True, "worker": 0}}, start_image=person, video=long)
+    made = reply["jobs"][0] if code == 200 else {}
+    done = wait_job(made.get("id"))
+    fresh = graphs(FAKES[0])[before[0]:]
+    check("G12h pessoa inteira: o recorte de cada pedaco passa pelo BiRefNet antes de ir para o Animate",
+          bool(done) and done["status"] == "done" and len(fresh) == 1 and node(fresh[0], "WanStudioWholePerson") is not None
+          and (node(fresh[0], "WanStudioForegroundLoader") or {}).get("model") == "BiRefNet-portrait",
+          str(done and (done["status"], done.get("error"))))
+    call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+
+    # ---- o rosto em detalhe (ajuste de teste): cada pedaco ganha uma segunda passada na cabeca
+    before = [len(graphs(base)) for base in FAKES]
+    code, reply = generate({**swap, "duration": 3, "expert": {"face": True, "worker": 0}}, start_image=person, video=long)
+    made = reply["jobs"][0] if code == 200 else {}
+    done = wait_job(made.get("id"))
+    fresh = graphs(FAKES[0])[before[0]:]
+    check("G12i rosto em detalhe: dois Animate e dois samplers no pedaco, e o video sai com os quadros do pedaco",
+          bool(done) and done["status"] == "done" and len(fresh) == 1
+          and sum(item["class_type"] == "WanAnimateToVideo" for item in fresh[0]) == 2
+          and sum(item["class_type"] == "KSampler" for item in fresh[0]) == 2 and node(fresh[0], "WanStudioFacePaste") is not None,
+          str(done and (done["status"], done.get("error"))))
+    call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+
+    # ---- a janela na pessoa (ajuste de teste), nas duas cadeias: cada pedaco gera so o retangulo
+    # em que a pessoa esta e o cola de volta no video; a cor so e igualada a de um vizinho no tempo
+    before = [len(graphs(base)) for base in FAKES]
+    code, reply = generate({**swap, "expert": {"fps": 16, "chunk": 49, "chains": 2, "window": True}},
+                           start_image=person, video=long)
+    made = reply["jobs"][0] if code == 200 else {}
+    done = wait_job(made.get("id"))
+    fresh = [graph for base, start in zip(FAKES, before) for graph in graphs(base)[start:]]
+    plan = stitch.chains(160, 49, 5)
+    matched = sum("previous" in (node(graph, "WanStudioPaste") or {}) for graph in fresh)
+    check("G12g janela na pessoa: todo pedaco passa pela janela e pela colagem, o Animate gera no tamanho dela, "
+          "e a cor e igualada so nos pedacos que continuam de um vizinho no tempo",
+          bool(done) and done["status"] == "done" and len(fresh) == len(plan)
+          and all(node(graph, "WanStudioWindow") is not None and node(graph, "WanStudioPaste") is not None
+                  and isinstance(node(graph, "WanAnimateToVideo")["width"], list) for graph in fresh)
+          and matched == len(plan) - 2 and frames_of(done, "janela.mp4") == (160, "16/1"),
+          f"{len(fresh)} pedacos, {matched} com a cor igualada")
+    call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
 
     # ---- sem o modelo de interpolacao: os intermediarios ficam para o ffmpeg, na emenda
     before = [len(graphs(base)) for base in FAKES]
@@ -472,8 +548,9 @@ def big_scenarios():
           chosen == [names[0], names[1], names[0]], str(chosen))
 
     status = get("/api/status")
-    check("G18a placa grande no estado: uma GPU, com a memoria dela", status["workers"] == 1 and status.get("vram") == 45.0
-          and status["gpu"] == "NVIDIA L40S · 45 GB", f"{status.get('gpu')} {status.get('vram')}")
+    check("G18a placa grande no estado: uma GPU, com a memoria dela, numa sessao so de troca de pessoa",
+          status["workers"] == 1 and status.get("vram") == 45.0 and status["gpu"] == "NVIDIA L40S · 45 GB"
+          and status.get("focus") == "swap", f"{status.get('gpu')} {status.get('vram')} {status.get('focus')}")
     code, reply = generate({"mode": "swap", "duration": 10, "quality": "ultra", "seed": 5, "hd": True},
                            start_image=person, video=long)
     made = reply["jobs"][0] if code == 200 else {}
@@ -515,7 +592,8 @@ def run_big():
     procs = [spawn("fake_comfy.py", "fake_grande.log", "--port", BIG_FAKE.rsplit(":", 1)[1], FAKE_ASSETS=str(WORK),
                    FAKE_SETS="animate,animate_fp8", FAKE_STEP="0.1", FAKE_GPU="NVIDIA L40S", FAKE_VRAM_GB="45"),
              spawn("run_server_enhancer.py", "server_grande.log", PORT=BIG_SERVER.rsplit(":", 1)[1], COMFY_URLS=BIG_FAKE,
-                   ENHANCER_WORKER="-1", WARM_UP="0", DATA_DIR=str(WORK / "data_grande"), LOG_DIR=str(WORK / "logs_grande"))]
+                   ENHANCER_WORKER="-1", WARM_UP="0", SO_TROCA="1", DATA_DIR=str(WORK / "data_grande"),
+                   LOG_DIR=str(WORK / "logs_grande"))]
     try:
         wait_for(BIG_FAKE + "/queue")
         wait_for(BIG_SERVER + "/api/presets")

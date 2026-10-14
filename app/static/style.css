@@ -77,6 +77,7 @@ button:disabled { cursor: not-allowed; }
 .panel-scroll { display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 18px; overflow-y: auto; scrollbar-width: thin; }
 .panel-foot { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 18px; border-top: 1px solid var(--line); background: var(--panel); }
 
+.panel-title { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg); border-radius: var(--radius); }
 .tab { flex: 1 1 auto; padding: 9px 10px; border: 0; border-radius: 9px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .tab[aria-selected="true"] { background: var(--raised); color: var(--text); }
@@ -89,6 +90,13 @@ button:disabled { cursor: not-allowed; }
 .field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.row:not(:has(> :not([hidden]))) { display: none; }  /* nada a mostrar: nem o espaco dela */
+/* Troca de pessoa: o trecho (duracao e comeco) vem logo depois dos arquivos, antes da
+   qualidade, que mostra o tempo que ele leva. */
+.panel.swap #timing-row { order: 1; }
+.panel.swap #swap-options, .panel.swap #prompt-field, .panel.swap #presets-field,
+.panel.swap #model-field, .panel.swap .advanced { order: 2; }
+.panel.swap textarea { min-height: 64px; }  /* o prompt e opcional */
 /* Troca de pessoa: cinco duracoes nao cabem em meia linha. */
 .row:has([data-key="length"]:not([hidden])) { grid-template-columns: 1fr; }
 .inline { display: flex; gap: 8px; }
@@ -331,6 +339,45 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .card-actions > * { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; text-decoration: none; }
 .card-actions .danger { margin-left: auto; color: var(--danger); }
+.card-actions .accent { border-color: var(--accent); color: var(--accent); }
+
+/* ---- galeria vazia: por onde comecar ---- */
+.starter { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 18px; }
+.starter-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 12px 14px;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--panel);
+  text-align: left;
+  transition: border-color .15s, transform .15s;
+}
+.starter-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+/* Pagina so de troca de pessoa: os tres passos, no lugar dos cartoes dos modos. */
+.howto { padding: 0; list-style: none; }
+.howto .starter-card:hover { border-color: var(--line); transform: none; }
+.step { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #0b0c0d; font-size: 14px; font-weight: 800; }
+.starter-card b { font-size: 15px; }
+.starter-card small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.starter-art { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 9px; background: linear-gradient(135deg, #1c2a14, #0d1113 70%); }
+.starter-art i { position: absolute; display: block; }
+/* Trocar pessoa: duas silhuetas, a de tras apagada e a da frente acesa. */
+.art-swap i { bottom: 0; width: 24%; aspect-ratio: 1 / 1.7; border-radius: 46% 46% 12% 12%; }
+.art-swap i:first-child { left: 26%; background: #3a4146; opacity: .7; }
+.art-swap i:last-child { left: 50%; background: var(--accent); box-shadow: 0 0 26px rgba(200, 243, 29, .45); }
+/* Imagem -> video: um quadro com o triangulo de tocar. */
+.art-i2v { background: linear-gradient(135deg, #14242e, #0d1113 70%); }
+.art-i2v i { inset: 22% 34%; border: 2px solid var(--accent); border-radius: 8px; }
+.art-i2v i::after { content: ""; position: absolute; left: 50%; top: 50%; margin: -9px 0 0 -5px; border: 9px solid transparent; border-left: 14px solid var(--accent); border-right: 0; }
+/* Texto -> video: linhas de texto. */
+.art-t2v { background: linear-gradient(135deg, #261c2e, #0d1113 70%); }
+.art-t2v i { left: 18%; height: 7%; border-radius: 99px; background: #4a4f55; }
+.art-t2v i:nth-child(1) { top: 30%; width: 64%; background: var(--accent); }
+.art-t2v i:nth-child(2) { top: 47%; width: 48%; }
+.art-t2v i:nth-child(3) { top: 64%; width: 56%; }
+/* Imagem: sol e montanha. */
+.art-img { background: linear-gradient(135deg, #2c2414, #0d1113 70%); }
+.art-img i { right: 24%; top: 22%; width: 13%; aspect-ratio: 1; border-radius: 50%; background: var(--accent); }
+.art-img::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: 0; height: 46%; background: #3a4146; clip-path: polygon(0 100%, 30% 20%, 52% 62%, 68% 36%, 100% 100%); }
 
 /* ---- dialogos ---- */
 .dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); }
@@ -361,6 +408,11 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
 .viewer-media { display: grid; place-items: center; min-height: 240px; background: #000; }
 .viewer-media video, .viewer-media img { display: block; max-width: 100%; max-height: calc(100vh - 34px); }
 .viewer-side { display: flex; flex-direction: column; gap: 12px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 34px); }
+/* O original e o resultado lado a lado, do mesmo tamanho. */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 100%; max-height: calc(100vh - 34px); }
+.compare-pane { position: relative; margin: 0; overflow: hidden; aspect-ratio: var(--ratio, 9 / 16); max-height: calc(100vh - 34px); justify-self: center; }
+.compare-pane video { width: 100%; height: 100%; object-fit: cover; }
+.compare-pane figcaption { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .65); font-size: 11px; font-weight: 600; }
 .viewer-prompt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 860px) {

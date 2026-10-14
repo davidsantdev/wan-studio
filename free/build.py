@@ -8,6 +8,7 @@ Rode de novo sempre que alterar app/, vm/ ou free/launcher.py:
 
   python free/build.py
   python free/build.py --site https://meu-wan.netlify.app   (quando o site tiver endereco proprio)
+  python free/build.py --tudo   (a sessao baixa tambem os outros modos: texto e imagem -> video)
 
 `free/pairing.json` guarda o segredo que liga o notebook ao site. Ele vai dentro do notebook:
 mantenha o notebook privado e nao publique esse arquivo.
@@ -28,6 +29,17 @@ STATIC = ROOT / "app" / "static"
 PAIRING_FILE = FREE / "pairing.json"
 SITE_FILE = ROOT / "site" / "index.html"
 NOTEBOOK_FILE = FREE / "wan_studio_free.ipynb"
+# O notebook da sessao sem GPU (--cpu), que so serve para conferir se o codigo roda: nao gasta
+# a cota de GPU, e cada passo leva minutos. O ComfyUI roda em CPU, nada e aquecido, os modelos
+# de 14B ficam de fora e a sessao nao se anuncia ao site (ele nao pode confundi-la com a GPU).
+CPU_NOTEBOOK_FILE = FREE / "wan_studio_cpu.ipynb"
+# (O Animate em INT8 nao entra: na CPU o passo dele nao terminou em 35 minutos; so a GPU diz.)
+CPU_ENV = {"SKIP_GPU_CHECK": "1", "KEEP_TORCH": "1", "SKIP_SPEEDUPS": "1", "PESSOA_INTEIRA": "1",
+           "WAN_COMFY_ARGS": "--cpu", "WAN_SAM2_DEVICE": "cpu", "WARM_UP": "0",
+           "WAN_NTFY_URL": "http://127.0.0.1:9"}
+# A sessao de costume so troca pessoa em video: baixa 27 GB em vez de 83, fica pronta mais cedo
+# e deixa as duas GPUs para o video (vm/setup.sh, SO_TROCA). Com --tudo, o estudio inteiro.
+SWAP_ENV = {"SO_TROCA": "1"}
 SHORTCUT_FILE = ROOT / "Wan Studio.url"
 BUNDLED = ("app", "vm", "free/launcher.py", "free/pairing.json")
 
@@ -48,13 +60,18 @@ ele contém a chave que conecta esta sessão ao seu site.
 No Colab: *Ambiente de execução → Alterar o tipo de ambiente → GPU T4*.
 
 **Para usar:** clique em **Run All**. Em uns 5 minutos a segunda célula mostra o link e o
-código de conexão; depois da primeira vez, o site conecta sozinho. O melhorador de prompt, a
-troca de pessoa (Animate) e o modelo 14B continuam baixando em segundo plano e aparecem no site
-quando ficarem prontos.
+código de conexão; depois da primeira vez, o site conecta sozinho. __DOWNLOADS__
 
 **Para não gastar cota à toa:** a sessão se encerra sozinha depois de `IDLE_MINUTES` sem uso.
 Para deixar rodando sem esta aba aberta, use *Save Version → Save & Run All (Commit)*.
 """
+
+DOWNLOADS = {
+    True: "Os modelos da troca de pessoa (Wan 2.2 Animate, 20 GB) continuam baixando em segundo\n"
+          "plano por mais uns 3 minutos; o site libera o botão quando ficarem prontos.",
+    False: "O melhorador de prompt, a troca de pessoa (Animate) e o modelo 14B continuam baixando\n"
+           "em segundo plano e aparecem no site quando ficarem prontos.",
+}
 
 SETUP = '''\
 # 1. Configuração e instalação (uns 5 minutos na primeira célula)
@@ -63,7 +80,7 @@ IDLE_MINUTES = 60     # encerra a sessão após esse tempo sem uso; 0 = nunca
 
 import base64, io, os, shutil, sys, tarfile
 
-os.environ.update(__ENV__)  # ajustes de teste: python free/build.py --env NOME=valor
+os.environ.update(__ENV__)  # o tipo de sessão e os ajustes de teste: veja python free/build.py --help
 BUNDLE = "__BUNDLE__"
 
 
@@ -167,11 +184,12 @@ def cell(kind, name, source):
     return body
 
 
-def build_notebook(pairing, env=None):
+def build_notebook(pairing, env=None, target=NOTEBOOK_FILE):
     setup = (SETUP.replace("__SITE__", json.dumps(pairing["site"])).replace("__ENV__", json.dumps(env or {}))
              .replace("__BUNDLE__", bundle()))
     notebook = {
-        "cells": [cell("markdown", "leia-me", INTRO), cell("code", "instalar", setup),
+        "cells": [cell("markdown", "leia-me", INTRO.replace("__DOWNLOADS__", DOWNLOADS[bool((env or {}).get("SO_TROCA"))])),
+                  cell("code", "instalar", setup),
                   cell("code", "ligar", START), cell("code", "manter", KEEPALIVE)],
         "metadata": {
             "accelerator": "GPU",
@@ -184,7 +202,7 @@ def build_notebook(pairing, env=None):
         "nbformat": 4,
         "nbformat_minor": 5,
     }
-    NOTEBOOK_FILE.write_text(json.dumps(notebook, indent=1), encoding="utf-8", newline="\n")
+    target.write_text(json.dumps(notebook, indent=1), encoding="utf-8", newline="\n")
 
 
 def main():
@@ -192,14 +210,26 @@ def main():
     parser.add_argument("--site", help="endereco publico do site, para o notebook montar o link")
     parser.add_argument("--env", action="append", default=[], metavar="NOME=valor",
                         help="variavel de ambiente para a sessao (so para medir na GPU; refaca sem ela depois)")
+    parser.add_argument("--tudo", action="store_true",
+                        help="a sessao baixa tambem o 5B, o 14B e o melhorador de prompt (83 GB), e o site "
+                             "mostra todos os modos; sem isto, so a troca de pessoa")
+    parser.add_argument("--cpu", action="store_true",
+                        help="gera o notebook da sessao sem GPU (free/wan_studio_cpu.ipynb), para conferir o "
+                             "codigo sem gastar cota: python free/ligar.py --cpu")
     args = parser.parse_args()
-    env = dict(item.split("=", 1) for item in args.env)
+    tests = dict(item.split("=", 1) for item in args.env)
+    env = {**({} if args.tudo else SWAP_ENV), **tests}
 
     pairing = load_pairing(args.site)
+    if args.cpu:  # nao mexe no site nem no notebook de verdade
+        build_notebook(pairing, {**CPU_ENV, **env}, CPU_NOTEBOOK_FILE)
+        print(f"{CPU_NOTEBOOK_FILE.relative_to(ROOT)}  ({max(1, CPU_NOTEBOOK_FILE.stat().st_size // 1024)} KB)")
+        return
     build_site()
     build_notebook(pairing, env)
-    if env:
-        print(f"ATENCAO: notebook de teste, com {env}. Rode de novo sem --env antes de usar de verdade.")
+    if tests:
+        print(f"ATENCAO: notebook de teste, com {tests}. Rode de novo sem --env antes de usar de verdade.")
+    print("sessao: " + ("o estudio inteiro (--tudo)" if args.tudo else "so a troca de pessoa (--tudo traz os outros modos)"))
     for path in (SITE_FILE, NOTEBOOK_FILE, SHORTCUT_FILE):
         print(f"{path.relative_to(ROOT)}  ({max(1, path.stat().st_size // 1024)} KB)")
     if pairing["site"]:

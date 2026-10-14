@@ -1,8 +1,21 @@
 # Wan Studio
 
-Estúdio de vídeo por IA no estilo Higgsfield, com o **Wan 2.2** (open source) e sem nenhum
-custo: o site é um arquivo só, a GPU é a gratuita do Kaggle e a sua galeria fica guardada no
-navegador.
+**Troca de pessoa em vídeo**, no estilo Higgsfield, com o **Wan 2.2 Animate** (open source): a
+pessoa de uma foto entra no lugar da pessoa de um vídeo, com os mesmos movimentos, o mesmo
+cenário e o áudio original. O site é um arquivo só, a sua galeria fica guardada no navegador e
+a GPU é emprestada, de um de dois lugares.
+
+| GPU | Custo | Troca de pessoa de 23 s na melhor qualidade | Como liga |
+|---|---|---|---|
+| **Gratuita** (Kaggle, 2× T4) | nenhum; 30 horas por semana | 2 h 10 (medido em 13/10/2026) | **Ligar GPU** |
+| **Rápida** (Modal, H100) | os US$ 30 de crédito que o Modal dá por mês; exige cartão cadastrado | uns 10 minutos (conta, ainda sem medida) | **Ligar GPU rápida**, ou o botão do próprio site |
+
+O site é o mesmo nas duas, e acha sozinho a que estiver ligada.
+
+O Wan Studio também gera vídeo a partir de texto e de imagem (veja *Os outros modos*), mas
+desde 13/10/2026 **a sessão de costume só faz a troca de pessoa**: baixa 27 GB de modelos em
+vez de 83, deixa as duas GPUs do Kaggle para o vídeo e o site abre direto nela, sem as abas
+dos outros modos.
 
 ```
  SITE (endereço fixo)                          GPU GRATUITA (só enquanto você usa)
@@ -17,11 +30,95 @@ navegador.
 O site abre sempre no mesmo lugar e funciona com a GPU desligada (você vê e baixa o que já
 gerou). Para gerar, você liga a GPU com dois cliques; o site encontra a sessão sozinho.
 
-## Ligar a GPU
+## Ligar a GPU rápida (Modal)
+
+A T4 gratuita leva 154 segundos em cada passo de um pedaço de vídeo (medido: é a placa, não a
+configuração), e o Kaggle só dá duas. Para a troca de pessoa sair em minutos é preciso uma
+placa umas dez vezes mais rápida. O [Modal](https://modal.com) aluga essas placas por segundo
+e dá **US$ 30 de crédito por mês**, renovados, no plano gratuito; o Wan Studio liga a máquina
+só enquanto você usa e a desliga sozinho.
+
+> **Estado em 13/10/2026: pronto e nunca rodado de verdade.** Tudo o que não depende da conta
+> foi testado (a sessão de verdade sobe aqui, com o ComfyUI simulado, pelas mãos de um Modal de
+> mentira: 33 verificações). O que só a conta mostra continua sem conferir: a imagem montar, os
+> modelos baixarem, a placa gerar, e **os tempos e custos abaixo, que são contas** a partir da
+> ficha das placas. Faltava uma conta com cartão cadastrado.
+
+### Antes da primeira vez
+
+1. **Conta no Modal**, em https://modal.com (entra com o Google ou o GitHub).
+2. **Cartão cadastrado**, em https://modal.com/settings/usage. O Modal exige um meio de
+   pagamento para ligar máquinas, mesmo dentro do crédito gratuito.
+3. Na mesma página, ponha o **spend limit** (o teto do que pode ser cobrado além do crédito)
+   no menor valor que ela aceitar. Com ele, quando o crédito do mês acaba as máquinas param
+   em vez de o cartão ser cobrado.
+
+### Ligar
+
+Dois cliques em **Ligar GPU rápida** (nesta pasta). Na primeira vez ele:
+
+1. instala o cliente do Modal numa pasta própria (`nuvem/.venv`) e abre o navegador para você
+   autorizar este computador (*Approve*);
+2. publica o Wan Studio na sua conta. O Modal monta a imagem (ComfyUI e PyTorch): uns 8 minutos,
+   uma vez;
+3. baixa os modelos da troca de pessoa (36 GB) para um volume da sua conta: de 5 a 15 minutos,
+   uma vez, sem usar GPU nem a internet do seu computador;
+4. liga a máquina e abre o site já pareado.
+
+Daí em diante ligar leva **1 a 2 minutos**: os modelos já estão no volume. E não precisa mais
+do atalho: o site ganha o botão **Ligar a GPU rápida** (clique no indicador *GPU desligada*),
+que funciona de qualquer aparelho em que o site tenha sido aberto por esse atalho uma vez.
+
+A máquina **se desliga sozinha após 5 minutos sem uso** (`--ocioso` muda isso) e só cobra
+enquanto está ligada. Para desligar antes: no site, **indicador verde → Desligar GPU**.
+
+```powershell
+python nuvem\ligar.py status        # ligada ou não, a placa e o crédito gasto no mês (estimativa)
+python nuvem\ligar.py registro      # o que a máquina está fazendo
+python nuvem\ligar.py desligar      # desliga agora
+python nuvem\ligar.py --gpu L40S    # outra placa (L40S, A100, H100, H200, B200)
+python nuvem\ligar.py modelos --tudo   # baixa também os modelos do 5B e do 14B (mais 50 GB)
+python nuvem\ligar.py publicar      # reenvia o código (o atalho já faz isso quando ele muda)
+```
+
+### Quanto custa
+
+O crédito mensal paga o tempo de máquina. Preços do Modal em 13/10/2026, por hora ligada (a
+máquina cobra também processador e memória: uns US$ 0,45 por hora, já somados na última coluna):
+
+| Placa | Memória | Só a placa | A sessão | Horas com os US$ 30 |
+|---|---|---|---|---|
+| L40S | 48 GB | 1,95 | 2,40 | 12,5 |
+| A100 | 40 GB | 2,10 | 2,55 | 11,8 |
+| H100 (padrão) | 80 GB | 3,95 | 4,40 | 6,8 |
+| H200 | 141 GB | 4,54 | 4,99 | 6,0 |
+| B200 | 180 GB ou mais | 6,25 | 6,70 | 4,5 |
+
+Pela conta (a H100 gerando umas 10 vezes mais rápido que a T4), um vídeo de 23 s na melhor
+qualidade sairia em uns 10 minutos e US$ 0,70: uns 40 por mês dentro do crédito. Na qualidade
+*Boa*, uns 5 minutos e 80 por mês. O site mostra, antes de gerar, o tempo estimado e quanto
+aquele vídeo gasta; e, em cada vídeo pronto, quanto ele gastou de fato. Guardar os modelos não
+gasta crédito (o Modal dá 1 TiB de volume), nem baixar os vídeos.
+
+### O que muda em relação ao Kaggle
+
+- **Uma placa só**, grande. A troca de pessoa usa o modelo em fp8 (em vez do GGUF Q4 da T4) e
+  ganha a qualidade **Ultra** (720p direto); o melhorador de prompt, que usa a segunda GPU do
+  Kaggle, não fica disponível.
+- **Os modelos ficam guardados** no volume da conta: nada é baixado de novo a cada sessão.
+- **O Modal pode tomar a máquina de volta** no meio de um vídeo (é raro; acontece mais em
+  sessões longas). A sessão sobe de novo sozinha, mas o vídeo que estava sendo gerado se
+  perde: é só pedir outra vez.
+- O endereço público é um túnel do próprio Modal (no Kaggle, da Cloudflare). O limite de 100 MB
+  por vídeo do site continua valendo.
+
+## Ligar a GPU gratuita (Kaggle)
 
 Dois cliques em **Ligar GPU** (nesta pasta). Ele envia o notebook ao Kaggle pela API oficial,
 que o executa em segundo plano, e abre o site já pareado. Em uns 5 minutos o indicador do
-site fica verde sozinho, e a troca de pessoa é liberada em mais 3. Não é preciso abrir o
+site fica verde sozinho, e a troca de pessoa é liberada em mais 3 (tempos da sessão antiga, que
+baixava o 5B antes; a de hoje, só de troca, conectou em 3 minutos e meio e liberou a troca em 5
+numa sessão de CPU do Kaggle, e na de GPU ainda não foi cronometrada). Não é preciso abrir o
 Kaggle nem deixar janela nenhuma aberta. Em horários cheios o Kaggle põe a sessão numa fila
 antes de ligar a máquina: num teste de manhã foram 35 minutos, de madrugada nenhum. O site
 conecta quando ela sair da fila.
@@ -123,6 +220,17 @@ custa de 30 a 45% menos onde existe.
 
 ## O que dá para fazer
 
+A sessão de costume faz uma coisa: **trocar a pessoa de um vídeo** (a seção logo abaixo), com
+a galeria, o *Comparar com o original* e a produção em massa.
+
+### Os outros modos
+
+Continuam no código e voltam, como abas no site, quando a sessão é ligada com os modelos deles:
+
+- no Kaggle: `python free\build.py --tudo` e **Ligar GPU** de novo (a sessão passa a baixar os
+  83 GB; `python free\build.py`, sem nada, volta à sessão só de troca);
+- na GPU rápida: `python nuvem\ligar.py modelos --tudo`.
+
 | Recurso | Como funciona |
 |---|---|
 | Texto → Vídeo | Wan 2.2 5B (24 fps) ou 14B (16 fps), 3 ou 5 segundos, 480p ou 720p |
@@ -151,7 +259,7 @@ compara os dois resultados.
 
 ### Trocar a pessoa de um vídeo
 
-Na aba **Trocar pessoa**, envie uma imagem da pessoa e um vídeo (até 100 MB). O resultado é o
+Envie uma imagem da pessoa e um vídeo (até 100 MB). O resultado é o
 mesmo vídeo com a pessoa da imagem no lugar da pessoa principal: mesmos movimentos e expressões,
 mesmo cenário, luz ajustada à do vídeo e o áudio original. A troca é da pessoa inteira (rosto,
 cabelo, corpo e roupa vêm da imagem), não só do rosto.
@@ -197,6 +305,9 @@ cabelo, corpo e roupa vêm da imagem), não só do rosto.
 - **Manter o cenário do vídeo**: desmarque para o contrário: a pessoa da imagem copia os
   movimentos, mas fica no cenário da própria imagem.
 - O prompt é opcional; presets de câmera, efeito e estilo não se aplicam.
+- **Comparar com o original**: no vídeo pronto (clique nele na galeria), esse botão põe o vídeo
+  de origem e o resultado lado a lado, andando juntos. Vale para vídeos de origem de até 25 MB,
+  que são os que o navegador guarda.
 
 Use apenas imagens de pessoas que autorizaram o uso.
 
@@ -246,8 +357,14 @@ galeria do navegador); eles aparecem só em `producao/prontos`.
 
 ### O que carrega e quando
 
-O estúdio abre assim que o **5B** está pronto (~19 GB). O resto baixa em segundo plano e
-aparece sozinho na interface; o diálogo da GPU mostra o que está baixando.
+**Na sessão de costume (só a troca de pessoa)** são 27 GB. O site conecta assim que o ComfyUI
+e o codificador de texto (7 GB) estão no lugar; o Wan 2.2 Animate (GGUF Q4), com detecção,
+recorte, interpolação e restauração (20 GB), baixa em seguida, e o formulário avisa enquanto
+ele não chega. O melhorador de prompt não é baixado: a troca de pessoa não o usa, e a segunda
+GPU fica só para o vídeo.
+
+**Com `--tudo`** o estúdio abre assim que o **5B** está pronto (~19 GB). O resto baixa em
+segundo plano e aparece sozinho na interface; o diálogo da GPU mostra o que está baixando.
 
 | Ordem | Item | Tamanho | Libera |
 |---|---|---|---|
@@ -291,6 +408,10 @@ no endereço hospedado, nem em outro aparelho. Baixe o que quiser levar.
   7. A troca de pessoa leva meio minuto de GPU por segundo de vídeo na qualidade *Rápida*
   (10 s em 5 minutos, 60 s em 25) e o triplo na *Boa*. O primeiro vídeo de cada modelo na
   sessão demora mais, porque carrega os modelos.
+  Medido em 13/10/2026 num vídeo de uso real (23,5 s, em pé, *Máxima* com alta definição e
+  movimento fluido): 154 s por passo, 12 minutos por pedaço de 49 quadros, 9 pedaços. Foram
+  1 h 41 de geração numa GPU só, com a outra parada, e mais 23 minutos de restauração nas
+  duas (5 a 6 minutos por pedaço): umas 2 h 10 ao todo.
 - **Galeria no navegador**: limpar os dados do navegador apaga a galeria. Baixe o que importa.
 - **Regras do Kaggle**: é um serviço de ciência de dados; usar a GPU para gerar vídeo é por sua
   conta. Use com moderação e não gere conteúdo adulto: há relatos de contas bloqueadas por isso.
@@ -311,6 +432,12 @@ no endereço hospedado, nem em outro aparelho. Baixe o que quiser levar.
   `lightning` a ninguém nem as publique. A chave do Lightning nunca é enviada para a máquina:
   lá o Wan Studio usa a que o próprio Lightning deixa disponível no Studio. A pasta `site` pode ser
   publicada, não tem segredo nenhum.
+- `~/.modal.toml` (na sua pasta de usuário) é a autorização da conta do Modal: quem tiver esse
+  arquivo liga máquinas na sua conta e gasta o seu crédito. O endereço e a chave com que o
+  site liga a GPU rápida ficam guardados no navegador (e passam por `free/abrir.html`); essa
+  chave só serve para ligar a sessão com a configuração que o atalho deixou, não dá acesso à
+  conta. Rodar o atalho de novo não a troca; para invalidá-la, apague a entrada `wake` do
+  dicionário `wan-studio-estado` no painel do Modal.
 - O anúncio da sessão passa pelo ntfy.sh (serviço público e gratuito) cifrado com AES-256-GCM;
   o serviço só vê bytes ilegíveis. Se ele estiver fora do ar, o código de conexão continua
   funcionando.
@@ -324,7 +451,12 @@ no endereço hospedado, nem em outro aparelho. Baixe o que quiser levar.
 | Célula 1: "nvidia-smi não encontrado" | Telefone não verificado, ou *Session options → Accelerator → GPU T4 x2* |
 | Ligar GPU fica "na fila" por muito tempo | É a fila do Kaggle; pode fechar a janela, o site conecta quando liberar |
 | O site não conecta | Rode `python free\ligar.py status`; se estiver desligada, ligue de novo |
-| "faltou memória na GPU" | Use 480p, 3 segundos ou o modelo 5B; na troca de pessoa, a qualidade **Rápida** |
+| "faltou memória na GPU" | Na troca de pessoa, use a qualidade **Rápida**; nos outros modos, 480p, 3 segundos ou o modelo 5B |
+| O site só mostra a troca de pessoa | É a sessão de costume. Para os outros modos: `python free\build.py --tudo` e ligue a GPU de novo |
+| Ligar GPU rápida: "Payment method required" ou parecido | Cadastre o cartão e confira o limite em https://modal.com/settings/usage |
+| Ligar GPU rápida fica em "pedindo a máquina" | A placa está disputada no Modal: espere, ou ligue outra com `python nuvem\ligar.py --gpu L40S` |
+| Ligar GPU rápida: "A sessão parou ao ligar" | Rode `python nuvem\ligar.py registro` e me envie o que aparecer |
+| O botão **Ligar a GPU rápida** não aparece no site | Ele vem do atalho: dê dois cliques em **Ligar GPU rápida** uma vez neste computador (ou abra neste aparelho o link que ele abriu) |
 | Ligar GPU (Lightning): "não aceitou ligar a máquina" | Veja o saldo com `python lightning\ligar.py status` e o telefone da conta; ou escolha outra placa |
 | Ligar GPU (Lightning): o site não conecta | Rode `python lightning\ligar.py registro` e me envie o que aparecer |
 | A qualidade **Ultra** não aparece | Ela pede uma placa de 24 GB ou mais: ligue pelo **Ligar GPU (Lightning)** |
@@ -524,36 +656,112 @@ Outras medidas do dia:
 - **O site aberto levava os resultados dos testes** para a galeria do navegador; os testes de
   `tests/gpu_real.py` passaram a usar a fila que o site não enxerga, como a produção.
 
+### Em teste, ainda sem conferência na GPU (13/10/2026)
+
+O que está no código, desligado por padrão, porque este projeto só adota o que foi medido na
+GPU (veja *Por que a troca de pessoa tinha piorado*). Nada disto foi gerado ainda: a cota da
+semana no Kaggle acabou no dia em que foi escrito, e a GPU rápida ainda não tinha conta.
+
+| Ajuste | O que faz | Como testar | O que olhar |
+|---|---|---|---|
+| `chains=2` | **Duas cadeias de pedaços, uma em cada GPU do Kaggle.** Hoje os pedaços saem um depois do outro numa GPU e a outra fica parada. A primeira cadeia começa no primeiro quadro; a segunda começa perto do meio e, para herdar a aparência, recebe quadros já gerados do primeiro pedaço (a *âncora*). Na emenda entre as duas, os quadros que ambas geraram se fundem. Pelo plano, o vídeo de 23 s cai a 57% do tempo | `python tests\gpu_real.py juntos c_base c_duas c_livre` | o tempo; e os quadros em volta da emenda (`python tests\gpu_real.py quadros c_duas 92 106`): se a pessoa muda de um quadro para o outro, e se a segunda cadeia inventou algo, como fazia o pedaço do meio de 12/10 |
+| `chains=2`, `anchor=false` | O mesmo, com a segunda cadeia partindo só da imagem da pessoa: as duas GPUs começam juntas e o tempo cai a perto da metade, mas nada liga a aparência de uma cadeia à da outra | o `c_livre` acima | o mesmo, com mais atenção a cabelo e roupa de um lado e do outro da emenda |
+| `ref=crop` | Recorta a imagem da pessoa na caixa dela (pose + detector), na proporção do vídeo, antes de ela entrar no Animate. Hoje a imagem inteira entra com faixas pretas, e a pessoa fica pequena quando a proporção difere | `python tests\gpu_real.py juntos troca_vertical troca_vertical_crop` | o gorro e a roupa do personagem de corpo inteiro, que se perdiam com a imagem quadrada num vídeo em pé |
+| `box=larga`, `grow=16` | Caixa mais folgada em volta da pose e contorno mais engordado no recorte do SAM2 | `python tests\gpu_real.py juntos r_larga_rapida r_base_rapida` | se a trança da pessoa original ainda volta nos últimos segundos, e se o modelo inventou algo |
+| `unet=int8` | **O Animate em INT8** (o arquivo oficial da Comfy-Org, 17 GB) em vez do GGUF Q4. O ComfyUI fixado aqui (0.39) tem núcleos próprios para INT8, que só ligam com o PyTorch de CUDA 13; num relato com uma T4 e outro modelo, o INT8 rendeu 1,3 vez o fp8. Pela tabela de quem publicou o formato, a qualidade fica acima da do fp8 (e portanto do Q4) | gere o notebook com `python free\build.py --env TORCH_INDEX=cu130 --env ANIMATE_INT8=1`, ligue, e `python tests\gpu_real.py juntos i_q4 i_int8` | no registro (`log comfyui` e `log comfyui1`): o driver da placa (o CUDA 13 pede o 580 ou mais novo; com um mais antigo o instalador avisa e mantém o PyTorch da imagem, e aí o INT8 não rende), os segundos por passo de cada um e quanto do modelo ficou fora da placa (17 GB não cabem inteiros numa T4); e os quadros lado a lado |
+| `whole=true` | **A pessoa inteira.** O recorte do SAM2 é completado pelo de um modelo de recorte de primeiro plano (BiRefNet-portrait, licença MIT), só com os pedaços que saem da cabeça (cabelo, tranças, chapéu) e são pequenos perto da pessoa. No exemplo de 10 s da pasta `exemplos`, do meio para o fim, as tranças da pessoa original voltam grudadas na pessoa nova; rodado aqui nos quadros desse exemplo, o BiRefNet as pega em todos. Em fotos com várias pessoas ele junta quem está encostado e o que a pessoa segura (os bastões de um esquiador): por isso só entra o que sai da cabeça | gere o notebook com `python free\build.py --env PESSOA_INTEIRA=1`, ligue, e `python tests\gpu_real.py juntos w_base w_inteira` | se as tranças somem do meio para o fim (`quadros w_inteira 90 148`) e, no registro, quanto o recorte cresceu (`[wan_studio] pessoa inteira: ...`) |
+| `face=true` | **O rosto em detalhe.** Depois de gerar cada pedaço, uma segunda passada do Animate só na cabeça, ampliada até 3 vezes, com a cabeça da foto da pessoa como referência; o resultado volta para o lugar. Num plano aberto o rosto gerado em 480p tem de 60 a 90 px, e é aí que a semelhança com a foto se perde. Custa de 25 a 55% a mais de tempo quando roda; num close, com o rosto já grande, ela não roda | `python tests\gpu_real.py juntos f_base f_rosto` | se o rosto do `f_rosto` se parece mais com a foto, se a cabeça casa com o pescoço e o cabelo em volta, e o tempo de cada um |
+| `window=true` | **A janela na pessoa.** O Animate gera só o retângulo do quadro em que a pessoa está (com cenário em volta) e os quadros gerados voltam para o vídeo só onde o recorte dela manda; o resto do quadro fica com os pixels do vídeo de origem, em vez de passar pelo modelo. O passo custa mais que proporcionalmente aos pixels (na T4, 1,5 vez os pixels levou 1,9 vez o tempo): com a pessoa em metade do quadro, o pedaço sairia em bem menos da metade do tempo. Quando ela enche o quadro (mais de 85% dele), nada muda. A cor de cada pedaço é igualada à do anterior dentro do recorte | `python tests\gpu_real.py juntos j_base j_janela`, e `bateria j_vertical` para um vídeo em pé | no registro, o tamanho da janela (`[wan_studio] janela: ...`) e os segundos por passo; nos quadros, se dá para ver a borda da colagem em volta da pessoa, se ela saiu igual à do `j_base` e se a emenda entre os pedaços aparece (`python tests\gpu_real.py quadros j_janela 70 84`) |
+
+Na GPU rápida os mesmos testes rodam com `WAN_BACKEND=nuvem` na frente (no PowerShell:
+`$env:WAN_BACKEND = "nuvem"`); lá há uma placa só, e as duas cadeias saem uma depois da outra:
+serve para ver a emenda, não o ganho de tempo.
+
+O `ref=crop` sem pessoa achada na imagem (pose e detector falham) devolve a imagem como veio, e
+com a pessoa já ocupando quase toda a imagem não recorta. Para adotar qualquer um, mude o padrão
+em `app/workflows.py` (`SWAP_CHAINS`, `SWAP_WINDOW`, `SWAP_WHOLE`, `SWAP_FACE`, `REF_FITS`, `MASK_BOXES`, `MASK_GROW`), refaça
+`tests/padrao_troca.json` (o resumo do grafo padrão, que os testes conferem) e rode
+`python free\build.py`.
+
+Fora da tabela, por ser só um número: **3 passos em vez de 4** (`python tests\gpu_real.py juntos
+i_q4 p_3passos`). A LoRA foi destilada para 4; com 3 o pedaço levaria um quarto a menos, se a
+pessoa não perder detalhe.
+
+### No ComfyUI de verdade, sem GPU (13/10/2026)
+
+Com a cota de GPU da semana esgotada, o código novo rodou numa sessão **de CPU** do Kaggle,
+que não gasta cota (`python free\build.py --cpu`, `python free\ligar.py --cpu` e, com
+`WAN_BACKEND=cpu`, os testes `x_` de `tests/gpu_real.py`): o ComfyUI e os nós de verdade, os
+modelos de verdade, em 128 px e um passo só. Um pedaço de 17 quadros leva uns 20 minutos (o
+recorte da pessoa, 6; o passo, 8), e o resultado é um borrão: isso prova que os grafos rodam
+do começo ao fim, não que o vídeo presta nem quanto tempo leva.
+
+| Teste | O que exercita | Resultado |
+|---|---|---|
+| `x_base` | o pedaço de sempre: pose, recorte pelo SAM2, Animate em GGUF Q4 com as duas LoRAs, emenda | rodou: 17 quadros em 19,6 min, com a cena e uma pessoa no lugar da outra |
+| `x_crop` | `ref=crop` (a imagem da pessoa recortada na caixa dela), num vídeo em pé | rodou: 10,7 min, com os modelos já carregados |
+| `x_int8` | o Animate em INT8 com as LoRAs | pela metade: o ComfyUI reconheceu o arquivo ("Found quantization metadata", com as operações de INT8 entre as nativas), carregou os 19,7 GB e começou o passo; depois de 35 minutos nele, sem terminar, foi interrompido para dar a vez aos outros testes. Na CPU cada camada é desfeita, somada à LoRA e refeita; o que isso custa e rende numa placa só a GPU diz |
+| `x_janela` | a janela na pessoa, num quadro deitado | rodou (30 min): os nós da janela e da colagem rodaram no ComfyUI de verdade e a pessoa nova saiu no meio do cenário de origem. Num quadro tão pequeno (384×224) a pessoa ocupa quase tudo, e a janela ficou do tamanho do quadro, como deve: o corte em si só se confere em quadros maiores, na GPU |
+| `x_recorte` e `x_inteira` | só o recorte (pintado de vermelho, sem gerar) em 1,8 s do exemplo em que as tranças voltavam: o de sempre e o da pessoa inteira | rodaram (15 e 43 min). O de sempre deixou de fora a trança solta e o enfeite da cabeça em 13 dos 29 quadros; a pessoa inteira os pegou em todos, sem tirar nada do recorte (a imagem está em `exemplos`: "recorte da pessoa - o de sempre (esquerda) e a pessoa inteira (direita)"). É a causa do defeito do exemplo de 10 s, corrigida na origem; falta ver na GPU o vídeo gerado com ele |
+| `x_janela2` | a janela num quadro mais largo (576×224), em que sobra cenário dos lados | rodou (28 min): a pessoa nova no meio, o cenário de origem dos lados e nenhuma borda à vista. O passo levou menos que o de um quadro menor e inteiro, sinal de que a janela cortou; o tamanho dela, que o registro diria, não ficou guardado (a sessão desligou antes) |
+| `x_rosto` | o rosto em detalhe, num quadro deitado | rodou (33 min): a janela da cabeça foi achada e ampliada a 512 px, a segunda passada rodou e a cabeça voltou para o lugar sem borda à vista. Mesmo com um passo só, o rosto sai bem mais definido que sem ela (a imagem está em `exemplos`: "rosto em detalhe - teste na CPU, 1 passo"). Nesse quadro pequeno (384×224) a janela pegou também o tronco; pela conta, com o rosto de 90 px de um quadro de 480p, ela fica na cabeça e nos ombros |
+| `x_cadeias` | as duas cadeias, com a âncora e a mistura na emenda entre elas | pela metade: 4 dos 5 pedaços saíram (uns 20 min cada na CPU) e o teste parou no limite de 90 minutos, antes da emenda. A emenda com a mistura é conferida aqui, com o ffmpeg de verdade (*Emenda*, abaixo) |
+
 ### Nesta máquina, sem GPU
 
 - **Workflows**: os grafos de 5B e 14B em cada modo passam na validação de um ComfyUI real,
   com as versões fixadas em `vm/setup.sh`; os da troca de pessoa atual foram executados na
   GPU do Kaggle.
 - **Downloads**: as 26 URLs de modelo existem e têm o tamanho esperado.
-- **Emenda**: 17 verificações com o ffmpeg de verdade: plano de pedaços para qualquer
+- **Emenda**: 24 verificações com o ffmpeg de verdade: plano de pedaços para qualquer
   duração, cada quadro vindo do pedaço certo (com e sem quadros interpolados), cor igualada,
-  corte de cena.
-- **Motor**: 39 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
-  fim (o padrão) e, por ajuste de teste, nas duas GPUs a partir do meio; vídeo longo,
+  corte de cena; e as duas cadeias: o plano para qualquer duração, a mistura na emenda entre
+  elas e a cor de uma trazida à da outra.
+- **Motor**: 46 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
+  fim (o padrão) e, por ajuste de teste, nas duas GPUs a partir do meio, em duas cadeias
+  (com e sem âncora), com a janela na pessoa, a pessoa inteira ou o rosto em detalhe; a sessão
+  só de troca avisando o site; vídeo longo,
   aquecimento, alta definição em fase separada, cancelamento no meio, falta de memória,
   melhorador cedendo a GPU; e, com uma placa de 45 GB simulada, a qualidade *Ultra* (recusada
   na T4; 720p direto, pedaços de 77 quadros e modelo fp8 na placa grande).
-- **Site e servidor**: 82 verificações num Chrome real contra um ComfyUI simulado: parear,
+- **Site e servidor**: 95 verificações num Chrome real contra um ComfyUI simulado: parear,
   conectar, gerar, trocar pessoa, fila, cancelar, erro, galeria persistente, Animar, Continuar,
-  celular, desligar, e a *Ultra* aparecendo só na placa grande.
-- **Recorte**: 12 verificações do fechamento do recorte da pessoa (a parte do nó do ComfyUI
-  que é só conta): pessoa cortada pela borda, bolsões, corpo inteiro intacto, as duas pistas
-  por quadro-chave. O SAM2 em si só se confere na GPU.
+  celular, desligar, e a *Ultra* aparecendo só na placa grande; o botão de ligar a GPU rápida
+  (com a chave aceita e recusada), o tempo estimado em cada qualidade, a comparação com o
+  vídeo original; e a página só de troca de pessoa: é como o site abre na primeira visita
+  (sem abas, com os três passos na galeria vazia), as abas e os cartões dos outros modos
+  aparecem numa sessão que os ofereça e somem de novo numa só de troca.
+- **Recorte**: 57 verificações da parte dos nós do ComfyUI que é só conta: o fechamento do
+  recorte da pessoa (cortada pela borda, bolsões, corpo inteiro intacto, as duas pistas por
+  quadro-chave), o recorte da imagem da pessoa na proporção do vídeo (`ref=crop`), a janela
+  na pessoa (o tamanho dela em cada tipo de cena, a colagem de volta no vídeo, a cor trazida à
+  do pedaço anterior, corte de cena), a pessoa inteira (a trança e o chapéu entram; o bastão
+  na mão e o vizinho encostado não) e o rosto em detalhe (a janela da cabeça, a ampliação, a
+  segunda passada que nem roda quando o rosto já é grande). O SAM2, a detecção e o BiRefNet
+  em si só se conferem na GPU (o BiRefNet foi rodado aqui, na CPU, nos quadros do exemplo e em
+  quatro fotos).
+- **O grafo padrão não mudou**: sem ajuste de teste nenhum, o grafo de cada pedaço da troca
+  de pessoa é, nó por nó, o do código que foi medido na GPU (12 combinações de qualidade, alta
+  definição, movimento fluido e pedaço que continua de outro, conferidas contra o resumo em
+  `tests/padrao_troca.json`). Tudo o que entrou em 13/10/2026 só age quando pedido.
 - **Produção em massa**: 9 verificações contra o servidor de verdade com dois ComfyUI
   simulados: pastas criadas e explicadas, dois vídeos em pé produzidos com um ilegível no
   meio, saída em 1080×1920 a 30 quadros por segundo com o som, vídeos de origem arquivados,
   fila separada da do site, retomada depois de interrompido, desligamento no fim.
-- **Ligar GPU (Lightning)**: 44 verificações contra uma API do Lightning AI simulada, com as
+- **Ligar GPU (Lightning)**: 45 verificações contra uma API do Lightning AI simulada, com as
   rotas e os campos do cliente oficial (lightning-sdk 2026.10.1): criar o Studio, escolher a
   placa pelo que a conta oferece, ligar, enviar o pacote (os comandos remotos rodam de verdade
   num bash local: o pacote chega inteiro e um pedaço perdido é barrado pela conferência),
   iniciar, status, registro, desligar, chaves coladas de vários jeitos, e a máquina sendo
   desligada no fim, inclusive quando a instalação falha.
+- **Ligar GPU rápida (Modal)**: 33 verificações com um `modal` de mentira que imita o que se usa
+  do cliente oficial (1.6.1). O atalho autoriza, publica, baixa os modelos e liga; a sessão que
+  sobe é a de verdade (`nuvem/sessao.py`, o launcher e o servidor), sobre o ComfyUI simulado:
+  responde no túnel com a placa, o preço por hora e a troca de pessoa instalada; liga de novo
+  sem duplicar, desliga pela API, desliga sozinha por ociosidade, sobe pelo pedido do site
+  (*acordar*), e trata conta sem cartão, download que falha e sessão que para ao ligar. A
+  definição do app também foi carregada com o cliente de verdade, que aceita todos os
+  parâmetros usados; publicar e rodar ficaram sem conferir (veja abaixo).
 - **Ligar GPU**: 20 verificações contra uma API do Kaggle simulada, incluindo conta sem
   telefone verificado, sessão presa na fila e queda de internet logo depois do envio.
 - **Descoberta automática**: ida e volta pelo ntfy.sh real, com a cifra de verdade.
@@ -565,8 +773,20 @@ Outras medidas do dia:
   ComfyUI simulado.
 - **O recorte de hoje em vídeo de corpo inteiro, deitado, e com fotos e vídeos do usuário**:
   os testes foram com o exemplo oficial (quadrado, e o miolo dele em pé, de meio corpo).
-- **A trança que volta no fim do exemplo oficial**: continua. Fica à esquerda da pessoa, solta,
-  e nenhum dos métodos de recorte a pegou.
+- **A trança que volta no fim do exemplo oficial**: continua no padrão. Fica à esquerda da pessoa,
+  solta, e nenhum dos métodos de recorte do SAM2 a pegou; com a pessoa inteira (em teste) a prévia do
+  recorte, na CPU, passou a pegá-la. Falta o vídeo gerado com ela, na GPU.
+- **Tudo do Modal numa conta de verdade**: se a imagem monta (o instalador roda sem GPU e com
+  o PyTorch de CUDA 13, combinação nunca usada aqui), se o `onnxruntime-gpu` atual acha a GPU
+  (senão a detecção de pose cai para a CPU, mais lenta), se os modelos chegam ao volume, quanto
+  a sessão leva para subir, se o túnel do Modal aceita o envio de vídeos de 100 MB e, acima de
+  tudo, **quanto tempo a troca de pessoa leva em cada placa e quanto custa**. As estimativas do
+  site e deste arquivo para a H100 saem de um fator de 9 a 10 vezes sobre a T4.
+- **As duas cadeias**, a janela na pessoa, o Animate em INT8, o recorte da imagem da pessoa e
+  a caixa larga: veja *Em teste*. No ComfyUI de verdade eles só rodaram em CPU, em 128 px.
+- **A sessão só de troca de pessoa numa GPU de verdade**: quanto ela leva para conectar e para
+  liberar a troca, agora que não baixa o 5B. Numa sessão de CPU do Kaggle (a mesma rede e os
+  mesmos downloads) ela subiu, avisou o site de que só faz a troca e a liberou em 5 minutos.
 - **Tudo do Lightning AI numa conta de verdade**: o simulador segue o cliente oficial, mas o
   serviço pode responder diferente. Em especial: se a conta gratuita pode ligar a L40S, quanto
   disco ela guarda, se o comando remoto aceita o tamanho dos pedaços do pacote, se as chaves
@@ -594,6 +814,8 @@ free/     build.py gera o site e o notebook; ligar.py liga a GPU pela API do Kag
           launcher.py roda dentro do notebook; producao.py faz a produção em massa
 producao/ pastas da produção em massa (pessoa, videos, prontos, usados) e as opções dela
 lightning/ ligar.py liga a GPU pela API do Lightning AI; boot.py roda dentro da máquina
+nuvem/    a GPU rápida: wan_nuvem.py é o app do Modal (imagem, volume, sessão, acordar);
+          sessao.py roda dentro da máquina; ligar.py é o atalho
 site/     index.html gerado (não edite: altere app/static e rode o build)
 vm/       setup.sh instala ComfyUI e modelos; demais scripts são para máquina própria
 tests/    testes de ponta a ponta sem GPU, e gpu_real.py para testar na GPU ligada
@@ -603,12 +825,15 @@ exemplos/ resultados gerados na GPU gratuita
 Depois de alterar qualquer coisa em `app/`, `vm/` ou `free/launcher.py`:
 
 ```powershell
-python free\build.py        # regenera site/index.html e o notebook
+python free\build.py        # regenera site/index.html e o notebook (sessão só de troca de pessoa)
+python free\build.py --tudo # o mesmo, com a sessão que baixa todos os modos
 python tests\run_all.py     # opcional: roda os testes (veja os requisitos no próprio arquivo)
 ```
 
 O **Ligar GPU** envia o notebook novo a cada vez que liga; se a GPU já estiver ligada, desligue
-antes. O **Ligar GPU (Lightning)** não usa o notebook: empacota e envia o código atual a cada
+antes. O **Ligar GPU rápida** republica sozinho quando `app/`, `vm/`, `free/launcher.py` ou
+`nuvem/` mudam (só o que muda em `vm/setup.sh` refaz a imagem); a sessão que já estiver no ar
+segue com o código antigo até ser desligada. O **Ligar GPU (Lightning)** não usa o notebook: empacota e envia o código atual a cada
 vez que inicia o Wan Studio na máquina. Se o site estiver hospedado, reenvie também a pasta `site`.
 
 Os testes de `run_all.py` usam um ComfyUI simulado: provam o site e o servidor, não que um
@@ -618,6 +843,17 @@ vídeo sai. Para isso, com a GPU ligada (gasta a cota):
 python tests\gpu_real.py bateria t2v_5b troca   # gera de verdade e extrai quadros para conferir
 python tests\gpu_real.py log                    # registro do ComfyUI: tempos, memória, erros
 python tests\gpu_real.py desligar               # desliga a sessão (não age com vídeo em andamento)
+```
+
+Para saber se um grafo novo ao menos roda no ComfyUI de verdade, sem gastar a cota de GPU, há
+a sessão de CPU do Kaggle (lenta: 20 minutos por pedaço de 17 quadros em 128 px):
+
+```powershell
+python free\build.py --cpu ; python free\ligar.py --cpu    # notebook e sessão próprios ("Wan Studio CPU")
+$env:WAN_BACKEND = "cpu"
+python tests\gpu_real.py esperar animate
+python tests\gpu_real.py bateria x_base x_crop x_cadeias x_int8
+python tests\gpu_real.py desligar
 ```
 
 ### Máquina própria com GPU (opcional)

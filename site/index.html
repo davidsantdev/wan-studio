@@ -86,6 +86,7 @@ button:disabled { cursor: not-allowed; }
 .panel-scroll { display: flex; flex-direction: column; gap: 18px; min-height: 0; padding: 18px; overflow-y: auto; scrollbar-width: thin; }
 .panel-foot { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 18px; border-top: 1px solid var(--line); background: var(--panel); }
 
+.panel-title { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
 .tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg); border-radius: var(--radius); }
 .tab { flex: 1 1 auto; padding: 9px 10px; border: 0; border-radius: 9px; background: none; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .tab[aria-selected="true"] { background: var(--raised); color: var(--text); }
@@ -98,6 +99,13 @@ button:disabled { cursor: not-allowed; }
 .field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .field-title { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.row:not(:has(> :not([hidden]))) { display: none; }  /* nada a mostrar: nem o espaco dela */
+/* Troca de pessoa: o trecho (duracao e comeco) vem logo depois dos arquivos, antes da
+   qualidade, que mostra o tempo que ele leva. */
+.panel.swap #timing-row { order: 1; }
+.panel.swap #swap-options, .panel.swap #prompt-field, .panel.swap #presets-field,
+.panel.swap #model-field, .panel.swap .advanced { order: 2; }
+.panel.swap textarea { min-height: 64px; }  /* o prompt e opcional */
 /* Troca de pessoa: cinco duracoes nao cabem em meia linha. */
 .row:has([data-key="length"]:not([hidden])) { grid-template-columns: 1fr; }
 .inline { display: flex; gap: 8px; }
@@ -340,6 +348,45 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .card-actions > * { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); color: var(--text); font-size: 12.5px; text-decoration: none; }
 .card-actions .danger { margin-left: auto; color: var(--danger); }
+.card-actions .accent { border-color: var(--accent); color: var(--accent); }
+
+/* ---- galeria vazia: por onde comecar ---- */
+.starter { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 18px; }
+.starter-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 12px 14px;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--panel);
+  text-align: left;
+  transition: border-color .15s, transform .15s;
+}
+.starter-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+/* Pagina so de troca de pessoa: os tres passos, no lugar dos cartoes dos modos. */
+.howto { padding: 0; list-style: none; }
+.howto .starter-card:hover { border-color: var(--line); transform: none; }
+.step { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #0b0c0d; font-size: 14px; font-weight: 800; }
+.starter-card b { font-size: 15px; }
+.starter-card small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.starter-art { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 9px; background: linear-gradient(135deg, #1c2a14, #0d1113 70%); }
+.starter-art i { position: absolute; display: block; }
+/* Trocar pessoa: duas silhuetas, a de tras apagada e a da frente acesa. */
+.art-swap i { bottom: 0; width: 24%; aspect-ratio: 1 / 1.7; border-radius: 46% 46% 12% 12%; }
+.art-swap i:first-child { left: 26%; background: #3a4146; opacity: .7; }
+.art-swap i:last-child { left: 50%; background: var(--accent); box-shadow: 0 0 26px rgba(200, 243, 29, .45); }
+/* Imagem -> video: um quadro com o triangulo de tocar. */
+.art-i2v { background: linear-gradient(135deg, #14242e, #0d1113 70%); }
+.art-i2v i { inset: 22% 34%; border: 2px solid var(--accent); border-radius: 8px; }
+.art-i2v i::after { content: ""; position: absolute; left: 50%; top: 50%; margin: -9px 0 0 -5px; border: 9px solid transparent; border-left: 14px solid var(--accent); border-right: 0; }
+/* Texto -> video: linhas de texto. */
+.art-t2v { background: linear-gradient(135deg, #261c2e, #0d1113 70%); }
+.art-t2v i { left: 18%; height: 7%; border-radius: 99px; background: #4a4f55; }
+.art-t2v i:nth-child(1) { top: 30%; width: 64%; background: var(--accent); }
+.art-t2v i:nth-child(2) { top: 47%; width: 48%; }
+.art-t2v i:nth-child(3) { top: 64%; width: 56%; }
+/* Imagem: sol e montanha. */
+.art-img { background: linear-gradient(135deg, #2c2414, #0d1113 70%); }
+.art-img i { right: 24%; top: 22%; width: 13%; aspect-ratio: 1; border-radius: 50%; background: var(--accent); }
+.art-img::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: 0; height: 46%; background: #3a4146; clip-path: polygon(0 100%, 30% 20%, 52% 62%, 68% 36%, 100% 100%); }
 
 /* ---- dialogos ---- */
 .dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); }
@@ -370,6 +417,11 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
 .viewer-media { display: grid; place-items: center; min-height: 240px; background: #000; }
 .viewer-media video, .viewer-media img { display: block; max-width: 100%; max-height: calc(100vh - 34px); }
 .viewer-side { display: flex; flex-direction: column; gap: 12px; padding: 20px; overflow-y: auto; max-height: calc(100vh - 34px); }
+/* O original e o resultado lado a lado, do mesmo tamanho. */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; width: 100%; max-height: calc(100vh - 34px); }
+.compare-pane { position: relative; margin: 0; overflow: hidden; aspect-ratio: var(--ratio, 9 / 16); max-height: calc(100vh - 34px); justify-self: center; }
+.compare-pane video { width: 100%; height: 100%; object-fit: cover; }
+.compare-pane figcaption { position: absolute; top: 8px; left: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, .65); font-size: 11px; font-weight: 600; }
 .viewer-prompt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 860px) {
@@ -399,12 +451,13 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
   <main class="layout">
     <form id="form" class="panel" autocomplete="off">
       <div class="panel-scroll">
+      <h1 id="focus-title" class="panel-title" hidden>Trocar pessoa em vídeo</h1>
       <div class="tabs" data-key="mode" role="tablist">
+        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
         <button type="button" class="tab" role="tab" data-value="t2v">Texto → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="i2v">Imagem → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="flf">Início + Fim</button>
         <button type="button" class="tab" role="tab" data-value="img">Imagem</button>
-        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
       </div>
       <p id="mode-note" class="note warn" hidden></p>
 
@@ -428,18 +481,18 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
           <button type="button" class="drop-clear" hidden aria-label="Remover vídeo">×</button>
         </label>
       </div>
+      <p id="swap-note" class="note" hidden>A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
       <div id="swap-options" class="field" hidden>
-        <p class="note">A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
         <label class="check">
           <input type="checkbox" id="replace" checked>
           <span>Manter o cenário do vídeo (desmarque para a pessoa só copiar os movimentos, no cenário da própria imagem)</span>
         </label>
         <span class="field-title">Qualidade</span>
         <div class="segmented" data-key="quality">
-          <button type="button" data-value="rapida">Rápida<small>menor, ampliada</small></button>
-          <button type="button" data-value="boa">Boa<small>480p</small></button>
-          <button type="button" data-value="maxima">Máxima<small>576p</small></button>
-          <button type="button" data-value="ultra" hidden>Ultra<small>720p direto</small></button>
+          <button type="button" data-value="rapida">Rápida<small data-note="menor, ampliada">menor, ampliada</small></button>
+          <button type="button" data-value="boa">Boa<small data-note="480p">480p</small></button>
+          <button type="button" data-value="maxima">Máxima<small data-note="576p">576p</small></button>
+          <button type="button" data-value="ultra" hidden>Ultra<small data-note="720p direto">720p direto</small></button>
         </div>
         <label class="check" id="hd-row" hidden>
           <input type="checkbox" id="hd">
@@ -452,7 +505,7 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
         <p id="swap-estimate" class="note"></p>
       </div>
 
-      <div class="field">
+      <div class="field" id="prompt-field">
         <div class="field-head">
           <label class="field-title" for="prompt">Prompt</label>
           <button type="button" id="enhance" class="link" hidden>Melhorar com IA</button>
@@ -475,7 +528,7 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
         <div id="styles" class="chips" data-key="style" hidden></div>
       </section>
 
-      <section class="field">
+      <section class="field" id="model-field">
         <span class="field-title">Modelo</span>
         <p id="swap-model" class="fixed-choice" hidden>Wan 2.2 Animate<small>troca de pessoa · 16 fps</small></p>
         <div class="segmented" data-key="model">
@@ -506,7 +559,7 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
         </section>
       </div>
 
-      <div class="row">
+      <div class="row" id="timing-row">
         <section class="field" id="duration-field">
           <span class="field-title">Duração</span>
           <div class="segmented compact" data-key="duration">
@@ -565,7 +618,37 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
       </div>
       <p id="gallery-note" class="note"></p>
       <div id="gallery" class="gallery"></div>
-      <p id="empty" class="empty" hidden>Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo.</p>
+      <p id="empty" class="empty" hidden>Nada por aqui ainda. O que você quer criar?</p>
+      <ol id="howto" class="starter howto" hidden>
+        <li class="starter-card"><span class="step">1</span><b>Envie a foto da pessoa</b>
+          <small>De frente e bem iluminada; de corpo inteiro se o vídeo mostra o corpo inteiro.</small></li>
+        <li class="starter-card"><span class="step">2</span><b>Envie o vídeo</b>
+          <small>Até 100 MB. Escolha um trecho que comece com a pessoa de frente.</small></li>
+        <li class="starter-card"><span class="step">3</span><b>Clique em Trocar pessoa</b>
+          <small>O vídeo sai com os mesmos movimentos, o mesmo cenário e o áudio original, e fica guardado aqui.</small></li>
+      </ol>
+      <div id="starter" class="starter" hidden>
+        <button type="button" class="starter-card" data-start="swap">
+          <span class="starter-art art-swap" aria-hidden="true"><i></i><i></i></span>
+          <b>Trocar pessoa</b>
+          <small>A pessoa de uma foto entra no lugar da pessoa de um vídeo, com os mesmos movimentos e o mesmo cenário.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="i2v">
+          <span class="starter-art art-i2v" aria-hidden="true"><i></i></span>
+          <b>Imagem → Vídeo</b>
+          <small>Dê vida a uma imagem: movimento de câmera, efeito e estilo à sua escolha.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="t2v">
+          <span class="starter-art art-t2v" aria-hidden="true"><i></i><i></i><i></i></span>
+          <b>Texto → Vídeo</b>
+          <small>Descreva a cena e escolha entre 36 movimentos de câmera.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="img">
+          <span class="starter-art art-img" aria-hidden="true"><i></i></span>
+          <b>Imagem</b>
+          <small>Gere a imagem de partida e anime depois com um clique.</small>
+        </button>
+      </div>
     </section>
   </main>
 
@@ -577,10 +660,15 @@ textarea::placeholder, input::placeholder { color: #5d6468; }
       </div>
 
       <section id="gpu-off" class="dialog-section">
-        <p class="lead">Os vídeos são gerados numa GPU gratuita (do Kaggle ou do Lightning AI), que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <p class="lead">Os vídeos são gerados numa GPU que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <div id="wake-box" class="dialog-section" hidden>
+          <button type="button" id="wake" class="generate">Ligar a GPU rápida</button>
+          <p class="note">Liga em 1 a 2 minutos, daqui mesmo, e se desliga sozinha quando você para de usar. Gasta o crédito mensal da sua conta do Modal só enquanto está ligada.</p>
+          <p id="wake-error" class="error" role="alert" hidden></p>
+        </div>
         <ol class="steps">
-          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU</b> (Kaggle) ou em <b>Ligar GPU (Lightning)</b> (placa maior, para a qualidade Ultra).</li>
-          <li>Espere esta página conectar sozinha: uns 5 minutos, ou bem mais quando o Kaggle está cheio e deixa a máquina numa fila.</li>
+          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU rápida</b> (Modal: troca de pessoa em minutos) ou em <b>Ligar GPU</b> (Kaggle: sem custo nenhum, mais lenta).</li>
+          <li>Espere esta página conectar sozinha: 1 a 2 minutos na rápida; uns 5 no Kaggle, ou bem mais quando ele está cheio e deixa a máquina numa fila.</li>
         </ol>
         <details id="manual" class="manual">
           <summary>Ligar pelo site do Kaggle</summary>
@@ -660,7 +748,7 @@ const MAX_COLLECT_TRIES = 5;
 
 const ACTIVE = ["preparing", "queued", "running"];
 const DEFAULTS = {
-  mode: "t2v", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
+  mode: "swap", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
   resolution: "480p", duration: "5", count: "1", tab: "camera", filter: "all",
   quality: "boa", length: "5",  // troca de pessoa: qualidade e duracao do trecho
 };
@@ -761,6 +849,11 @@ if (store.get("qualities", 1) < 2) {
   state.quality = DEFAULTS.quality;
   store.set("qualities", 2);
 }
+// O que a sessao da GPU oferece: "swap", so a troca de pessoa (a sessao de costume), ou "all",
+// o estudio inteiro (notebook gerado com --tudo). Fica guardado, para a pagina abrir do mesmo
+// jeito com a GPU desligada.
+let focus = store.get("focus", "swap");
+const onlySwap = () => focus === "swap";
 const files = { start_image: null, end_image: null, video: null };
 let presets = { cameras: [], effects: [], styles: [] };
 let conn = store.get("conn");        // { url, password } da sessao atual da GPU
@@ -793,10 +886,14 @@ function parseCode(text) {
 const hasSession = (data) => /^https?:\/\//.test(data.u || "");
 
 /** Guarda o que o codigo trouxer: a sessao atual (u, p), o pareamento (t, k) ou os dois.
- *  O atalho "Ligar GPU" manda so o pareamento e a hora em que ligou (s). */
+ *  O atalho "Ligar GPU" manda so o pareamento e a hora em que ligou (s); o da GPU rapida
+ *  manda tambem o endereco e a chave com que esta pagina a liga sozinha (w, wk). */
 function connect(data) {
   if (data.t && data.k) {
-    pairing = { topic: data.t, key: data.k };
+    // Quem pareou pela GPU rapida e depois liga o Kaggle continua podendo ligar a rapida.
+    const kept = pairing && pairing.topic === data.t && pairing.wake ? { wake: pairing.wake, wakeKey: pairing.wakeKey } : {};
+    pairing = { topic: data.t, key: data.k, ...kept };
+    if (/^https:\/\//.test(data.w || "") && data.wk) Object.assign(pairing, { wake: data.w, wakeKey: data.wk });
     store.set("pairing", pairing);
   }
   if (hasSession(data)) {
@@ -832,13 +929,16 @@ async function decrypt(message, keyText) {
 }
 
 const DISCOVER_EVERY = 20000;
+const DISCOVER_STARTING = 4000;  // com a GPU ligando, o anuncio pode chegar a qualquer momento
+const WAKE_TIMEOUT = 60000;
 let discovering = false;
 let lastDiscover = 0;
+let waking = false;
 
 /** O notebook anuncia o endereco da sessao, cifrado, num topico que so este navegador conhece. */
 async function discover(force = false) {
   if (!pairing || discovering || document.hidden) return;
-  if (!force && Date.now() - lastDiscover < DISCOVER_EVERY) return;
+  if (!force && Date.now() - lastDiscover < (starting() ? DISCOVER_STARTING : DISCOVER_EVERY)) return;
   lastDiscover = Date.now();
   discovering = true;
   try {
@@ -859,6 +959,41 @@ async function discover(force = false) {
   }
 }
 
+/** Liga a GPU rapida daqui: chama o endereco fixo que o atalho deixou no pareamento. A sessao
+ *  sobe no Modal e se anuncia como qualquer outra; esta pagina a encontra pela descoberta. */
+async function wake() {
+  if (waking || !pairing || !pairing.wake) return;
+  const error = $("#wake-error");
+  error.hidden = true;
+  waking = true;
+  renderGpu();
+  try {
+    const response = await fetch(pairing.wake, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: pairing.wakeKey }), signal: AbortSignal.timeout(WAKE_TIMEOUT),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(response.status === 403
+        ? "Este navegador não está mais autorizado a ligar a GPU. Rode de novo o atalho Ligar GPU rápida."
+        : `O Modal não ligou a GPU: ${data.detail || "erro " + response.status}`);
+    }
+    store.set("starting", Math.floor(Date.now() / 1000));
+    lastDiscover = 0;
+    renderStatus();
+    refreshForm();
+    discover(true);
+  } catch (failure) {
+    error.hidden = false;
+    error.textContent = failure.name === "TypeError" || failure.name === "TimeoutError"
+      ? "Não consegui falar com o Modal. Confira a internet e tente de novo."
+      : failure.message;
+  } finally {
+    waking = false;
+    renderGpu();
+  }
+}
+
 async function refreshStatus() {
   let next = null;
   if (reachable()) {
@@ -871,6 +1006,11 @@ async function refreshStatus() {
     failures = 0;
     status = next;
     if (next.comfy) store.set("starting", null);  // chegou: nao esta mais "ligando"
+    if ((next.focus || "all") !== focus) {
+      focus = next.focus || "all";
+      store.set("focus", focus);
+      render();  // os cartoes mudam: o que leva a outro modo some ou volta
+    }
   } else if (++failures >= 2 || !status) {
     status = null;  // uma falha isolada nao derruba a tela; duas seguidas sim
   }
@@ -920,6 +1060,10 @@ function renderGpu() {
   $("#gpu-on").hidden = !on;
   $("#gpu-off").hidden = on;
   if (!on) {
+    // Quem pareou pela GPU rapida a liga daqui, sem o atalho (e de qualquer aparelho).
+    $("#wake-box").hidden = !(pairing && pairing.wake);
+    $("#wake").disabled = waking || starting();
+    $("#wake").textContent = waking ? "Pedindo a máquina…" : starting() ? "Ligando… 1 a 2 minutos" : "Ligar a GPU rápida";
     $("#step-paired").hidden = !pairing;
     $("#step-code").hidden = Boolean(pairing);
     // Quem ainda nao pareou precisa do caminho manual a vista; depois ele so atrapalha.
@@ -932,16 +1076,24 @@ function renderGpu() {
   }
 
   const rows = fact("Placa", status.gpu || "—");
-  for (const [name, label] of Object.entries(SET_NAMES)) {
-    const info = status.models[name];
-    const ok = Boolean(info && info.ok);
-    rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
-                      ok ? "yes" : "no"));
+  if (onlySwap()) {  // so o que a troca de pessoa usa
+    const swap = status.models.animate || {};
+    rows.push(...fact("Troca de pessoa", swap.ok ? "pronta" : status.extras ? "baixando" : "não instalada", swap.ok ? "yes" : "no"));
+    rows.push(...fact("Alta definição", swap.hd === "seedvr2" ? "restauração dos detalhes" : swap.hd ? "ampliação" : "indisponível",
+                      swap.hd ? "yes" : "no"));
+    rows.push(...fact("Movimento fluido", swap.rife ? "pronto" : "indisponível", swap.rife ? "yes" : "no"));
+  } else {
+    for (const [name, label] of Object.entries(SET_NAMES)) {
+      const info = status.models[name];
+      const ok = Boolean(info && info.ok);
+      rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
+                        ok ? "yes" : "no"));
+    }
+    const enhancer = status.enhancer;
+    const detail = enhancer.state === "error" || enhancer.state === "off" ? enhancer.detail : "";
+    rows.push(...fact("Melhorar prompt", ENHANCER_TEXT[enhancer.state] + (detail ? ` (${detail})` : ""),
+                      enhancer.state === "ready" ? "yes" : "no"));
   }
-  const enhancer = status.enhancer;
-  const detail = enhancer.state === "error" || enhancer.state === "off" ? enhancer.detail : "";
-  rows.push(...fact("Melhorar prompt", ENHANCER_TEXT[enhancer.state] + (detail ? ` (${detail})` : ""),
-                    enhancer.state === "ready" ? "yes" : "no"));
   if (status.extras) rows.push(...fact("Baixando", status.extras));
   $("#gpu-facts").replaceChildren(...rows);
 
@@ -1108,25 +1260,31 @@ function refreshEnhance() {
 
 /** Quanto a troca de pessoa deve levar, em minutos, com as escolhas atuais. Com duas GPUs o
  * video e gerado do meio para as pontas, dois pedacos por vez (veja app/stitch.py). */
-function swapMinutes() {
+function swapMinutes(quality = state.quality) {
   const frames = Number(state.length) * SWAP_FPS;
-  const hd = $("#hd").checked && !$("#hd-row").hidden;
+  // Quem ja gera em 720p (ultra) nao passa pela alta definicao.
+  const hd = $("#hd").checked && Boolean(status && status.models.animate && status.models.animate.hd) && quality !== "ultra";
   // Com a alta definicao, numa placa pequena, os pedacos sao de 49 quadros (o servidor decide).
   const small = !(online() && (status.vram || 0) >= ULTRA_MIN_VRAM);
-  const chunk = Math.min(SWAP_CHUNKS[state.quality] || SWAP_CHUNK, hd && small ? 49 : SWAP_CHUNK);
+  const chunk = Math.min(SWAP_CHUNKS[quality] || SWAP_CHUNK, hd && small ? 49 : SWAP_CHUNK);
   const stride = chunk - SWAP_OVERLAP;
   // Os pedacos saem um depois do outro, cada um continuando do anterior: o tempo acompanha
   // os quadros a gerar (um pedaco pequeno ainda custa uns 45% de um inteiro).
   const pieces = frames <= chunk ? Math.max(0.45, frames / chunk) : (frames - SWAP_OVERLAP) / stride;
   // O tempo de um pedaco menor que o de costume cai com os quadros dele, menos a parte fixa.
-  const usual = SWAP_CHUNKS[state.quality] || SWAP_CHUNK;
-  let seconds = SWAP_CHUNK_SECONDS[state.quality] * (0.25 + 0.75 * chunk / usual) * pieces;
+  const usual = SWAP_CHUNKS[quality] || SWAP_CHUNK;
+  let seconds = SWAP_CHUNK_SECONDS[quality] * (0.25 + 0.75 * chunk / usual) * pieces;
   if (hd) {
     // A restauracao vem depois, e nela as GPUs trabalham ao mesmo tempo (o Kaggle tem duas).
     const workers = status ? status.workers || 1 : 2;
     seconds += SWAP_HD_SECONDS * (chunk / 49) * pieces / workers;
   }
   return Math.max(1, Math.round(seconds / gpuSpeed() / 60));
+}
+
+/** "~14 min" ou "~1 h 20": o tempo estimado, curto o bastante para caber num botao. */
+function shortTime(minutes) {
+  return minutes < 60 ? `~${minutes} min` : `~${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
 }
 
 /** Quantas vezes a placa ligada e mais rapida que a T4 (1 para a T4 ou sem conexao). */
@@ -1137,9 +1295,14 @@ function gpuSpeed() {
 }
 
 function refreshForm() {
+  // Numa sessao so de troca de pessoa os outros modos nem aparecem.
+  $('[data-key="mode"]').hidden = onlySwap();
+  $("#focus-title").hidden = !onlySwap();
+  if (onlySwap() && state.mode !== "swap") choose("mode", "swap");
   const mode = state.mode;
   const image = mode === "img";
   const swap = mode === "swap";
+  $("#form").classList.toggle("swap", swap);  // a ordem dos campos muda (style.css)
 
   let ready;
   if (swap) {  // modelo fixo: o Animate
@@ -1172,6 +1335,7 @@ function refreshForm() {
   $('[data-frame="video"]').hidden = !swap;
   $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : "Frame inicial";
   $("#swap-options").hidden = !swap;
+  $("#swap-note").hidden = !swap;
   $("#prompt").placeholder = swap
     ? "Opcional: descreva a pessoa ou a cena…"
     : "Descreva a cena: quem aparece, onde, o que acontece, a luz…";
@@ -1187,16 +1351,28 @@ function refreshForm() {
   // Quem ja gera em 720p nao passa pela alta definicao (o arquivo nao ficaria maior).
   $("#hd-row").hidden = !(swap && info && info.hd) || state.quality === "ultra";
   $("#fluid-row").hidden = !(swap && info && info.rife);
-  $("#swap-estimate").textContent = swap
-    ? (gpuSpeed() === 1 ? "Tempo estimado na GPU gratuita" : "Tempo estimado nesta placa (conta ainda não conferida nela)")
-      + `: cerca de ${swapMinutes()} min. Pode deixar esta página aberta e voltar depois.`
-    : "";
+  if (swap) {
+    // Cada qualidade mostra quanto levaria com a duracao e a placa de agora.
+    for (const button of $$('[data-key="quality"] button')) {
+      const note = $("small", button);
+      note.textContent = `${note.dataset.note} · ${shortTime(swapMinutes(button.dataset.value))}`;
+    }
+    const minutes = swapMinutes();
+    // Numa maquina paga por tempo (a GPU rapida), o que o video gasta do credito.
+    const cost = online() && status.price_hour ? ` Gasta uns US$ ${(minutes / 60 * status.price_hour).toFixed(2)} do crédito.` : "";
+    $("#swap-estimate").textContent =
+      (gpuSpeed() === 1 ? "Tempo estimado na GPU gratuita" : "Tempo estimado nesta placa (conta ainda não conferida nela)")
+      + `: cerca de ${minutes} min.${cost} Pode deixar esta página aberta e voltar depois.`;
+  } else {
+    $("#swap-estimate").textContent = "";
+  }
   $("#duration-field").hidden = image;
   $("#start-field").hidden = !swap;
   $("#count-field").hidden = swap;
   $("#aspect-field").hidden = swap;
   $("#presets-field").hidden = swap;
   $("#swap-model").hidden = !swap;
+  $("#model-field").hidden = swap && onlySwap();  // um modelo so: nao ha o que mostrar
   $('[data-key="model"]').hidden = swap;
 
   // Imagem parada nao tem movimento de camera.
@@ -1544,6 +1720,7 @@ function describe(job) {
   if (job.mode === "swap") parts.push(job.replace === false ? "movimento copiado" : "pessoa trocada");
   if (job.hd) parts.push(job.hd_method === "seedvr2" ? "alta definição" : "ampliado");
   if (job.fluid) parts.push(`${job.out_fps} fps`);
+  if (job.cost) parts.push(`≈ US$ ${job.cost.toFixed(2)}`);  // tempo de maquina, na GPU paga por tempo
   for (const [key, list] of [["camera", presets.cameras], ["effect", presets.effects], ["style", presets.styles]]) {
     if (job[key] && job[key] !== "none") parts.push(nameOf(list, job[key]));
   }
@@ -1676,33 +1853,72 @@ function actionsFor(item) {
     const extension = item.kind === "image" ? "png" : "mp4";
     nodes.push(el("a", { href: item.url, download: `wan-${item.id}.${extension}`, textContent: "Baixar" }));
   }
-  nodes.push(actionButton("Reusar", () => reuse(item)));
-  if (item.local && item.kind === "image") {
+  // Numa sessao so de troca de pessoa, o que levaria a outro modo nao aparece.
+  if (!onlySwap() || item.mode === "swap") nodes.push(actionButton("Reusar", () => reuse(item)));
+  if (!onlySwap() && item.local && item.kind === "image") {
     nodes.push(actionButton("Animar", () => startFrom(item, async () => library.get(item.id).blob)));
   }
-  if (item.local && item.kind === "video") {
+  if (!onlySwap() && item.local && item.kind === "video") {
     nodes.push(actionButton("Continuar", () => startFrom(item, () => lastFrame(item.url))));
   }
   nodes.push(deleteButton(item));
   return nodes;
 }
 
-function openViewer(id) {
+let compareUrl = null;  // o video original aberto na comparacao, para soltar ao fechar
+
+/** O original e o resultado lado a lado, andando juntos: o resultado manda (tem os controles)
+ *  e o original o acompanha, a partir do ponto do video em que a troca comecou. */
+function compareMedia(item, original) {
+  const offset = Number(item.start) || 0;
+  compareUrl = URL.createObjectURL(original);
+  const before = el("video", { src: compareUrl, muted: true, playsInline: true, preload: "auto" });
+  const after = el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
+  const follow = () => {
+    const wanted = offset + after.currentTime;
+    if (Math.abs(before.currentTime - wanted) > 0.12) before.currentTime = wanted;
+  };
+  after.addEventListener("timeupdate", follow);
+  after.addEventListener("seeking", follow);
+  after.addEventListener("play", () => { follow(); before.play().catch(() => {}); });
+  after.addEventListener("pause", () => before.pause());
+  const pane = (label, video) => el("figure", { className: "compare-pane" }, video, el("figcaption", { textContent: label }));
+  const box = el("div", { className: "compare" }, pane("Original", before), pane("Resultado", after));
+  box.style.setProperty("--ratio", `${item.width} / ${item.height}`);
+  return box;
+}
+
+function releaseCompare() {
+  if (compareUrl) URL.revokeObjectURL(compareUrl);
+  compareUrl = null;
+}
+
+function openViewer(id, compare = false) {
   const stored = library.get(id);
   if (!stored) return;
   const item = { ...stored.job, status: "done", url: stored.url, local: true };
+  // A troca de pessoa guarda o video de origem (ate 25 MB): da para ver os dois lado a lado.
+  const original = item.mode === "swap" && stored.inputs && stored.inputs.video;
+  releaseCompare();
   const media = item.kind === "image"
     ? el("img", { src: item.url, alt: item.prompt })
-    : el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
+    : compare && original
+      ? compareMedia(item, original)
+      : el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
   $("#viewer-media").replaceChildren(media);
   $("#viewer-prompt").textContent = titleOf(item);
   const final = $("#viewer-final");
   final.hidden = !item.final_prompt;
   final.textContent = item.final_prompt ? `Enviado ao modelo: ${item.final_prompt}` : "";
   $("#viewer-meta").textContent = describe(item);
-  $("#viewer-actions").replaceChildren(...actionsFor(item));
+  const actions = actionsFor(item);
+  if (original) {
+    actions.splice(1, 0, actionButton(compare ? "Ver só o resultado" : "Comparar com o original",
+                                      () => openViewer(id, !compare), "accent"));
+  }
+  $("#viewer-actions").replaceChildren(...actions);
   $("#viewer").dataset.id = id;
-  $("#viewer").showModal();
+  if (!$("#viewer").open) $("#viewer").showModal();
 }
 
 function renderCard(item) {
@@ -1748,13 +1964,17 @@ function galleryItems() {
 }
 
 function render() {
+  // Uma sessao so de troca de pessoa nao gera imagem: o filtro so aparece se a galeria ja as tem.
+  const images = [...library.values()].some((stored) => stored.job.kind === "image");
+  $('[data-key="filter"]').hidden = onlySwap() && !images;
+  if (onlySwap() && !images && state.filter !== "all") choose("filter", "all");
   const items = galleryItems();
   const gallery = $("#gallery");
   const seen = new Set();
   items.forEach((item, index) => {
     seen.add(item.id);
     // So redesenha o card quando algo mudou, para nao interromper um video tocando.
-    const signature = item.local ? "local" : `${item.status}|${waitText(item)}|${item.error || ""}`;
+    const signature = item.local ? `local|${focus}` : `${item.status}|${waitText(item)}|${item.error || ""}`;
     let entry = cards.get(item.id);
     if (!entry || entry.signature !== signature) {
       const node = renderCard(item);
@@ -1772,9 +1992,13 @@ function render() {
   }
   const empty = $("#empty");
   empty.hidden = items.length > 0;
-  empty.textContent = state.filter === "all" || !library.size
-    ? "Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo."
-    : "Nada neste filtro.";
+  const nothing = state.filter === "all" || !library.size;
+  empty.textContent = !nothing ? "Nada neste filtro."
+    : onlySwap() ? "Nada por aqui ainda. Envie a foto da pessoa e o vídeo para começar."
+      : "Nada por aqui ainda. O que você quer criar?";
+  // Na pagina so de troca de pessoa, os tres passos; na do estudio inteiro, um cartao por modo.
+  $("#starter").hidden = items.length > 0 || !nothing || onlySwap();
+  $("#howto").hidden = items.length > 0 || !nothing || !onlySwap();
 }
 
 // ---------------------------------------------------------------- inicio
@@ -1806,6 +2030,7 @@ function bindUi() {
   });
 
   $("#status").addEventListener("click", openGpu);
+  $("#wake").addEventListener("click", wake);
   $("#connect-go").addEventListener("click", tryConnect);
   $("#connect-code").addEventListener("keydown", (event) => {
     if (event.key === "Enter") tryConnect();
@@ -1839,7 +2064,18 @@ function bindUi() {
     $("#status").textContent = "Desligando a GPU…";
   });
 
-  $("#viewer").addEventListener("close", () => $("#viewer-media").replaceChildren());
+  $("#viewer").addEventListener("close", () => {
+    $("#viewer-media").replaceChildren();
+    releaseCompare();
+  });
+  // Os cartoes da galeria vazia: cada um leva ao modo dele.
+  $("#starter").addEventListener("click", (event) => {
+    const card = event.target.closest("[data-start]");
+    if (!card) return;
+    choose("mode", card.dataset.start);
+    refreshForm();
+    $("#form").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
     document.title = baseTitle;
@@ -1871,6 +2107,8 @@ async function init() {
   await refreshStatus();
   pollJobs();
   setInterval(refreshStatus, STATUS_EVERY);
+  // Com a GPU ligando, a procura pelo anuncio nao espera a proxima leitura de estado.
+  setInterval(() => { if (SITE && !status && starting()) discover(); }, DISCOVER_STARTING);
 }
 
 init();

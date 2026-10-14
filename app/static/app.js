@@ -18,7 +18,7 @@ const MAX_COLLECT_TRIES = 5;
 
 const ACTIVE = ["preparing", "queued", "running"];
 const DEFAULTS = {
-  mode: "t2v", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
+  mode: "swap", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
   resolution: "480p", duration: "5", count: "1", tab: "camera", filter: "all",
   quality: "boa", length: "5",  // troca de pessoa: qualidade e duracao do trecho
 };
@@ -119,6 +119,11 @@ if (store.get("qualities", 1) < 2) {
   state.quality = DEFAULTS.quality;
   store.set("qualities", 2);
 }
+// O que a sessao da GPU oferece: "swap", so a troca de pessoa (a sessao de costume), ou "all",
+// o estudio inteiro (notebook gerado com --tudo). Fica guardado, para a pagina abrir do mesmo
+// jeito com a GPU desligada.
+let focus = store.get("focus", "swap");
+const onlySwap = () => focus === "swap";
 const files = { start_image: null, end_image: null, video: null };
 let presets = { cameras: [], effects: [], styles: [] };
 let conn = store.get("conn");        // { url, password } da sessao atual da GPU
@@ -151,10 +156,14 @@ function parseCode(text) {
 const hasSession = (data) => /^https?:\/\//.test(data.u || "");
 
 /** Guarda o que o codigo trouxer: a sessao atual (u, p), o pareamento (t, k) ou os dois.
- *  O atalho "Ligar GPU" manda so o pareamento e a hora em que ligou (s). */
+ *  O atalho "Ligar GPU" manda so o pareamento e a hora em que ligou (s); o da GPU rapida
+ *  manda tambem o endereco e a chave com que esta pagina a liga sozinha (w, wk). */
 function connect(data) {
   if (data.t && data.k) {
-    pairing = { topic: data.t, key: data.k };
+    // Quem pareou pela GPU rapida e depois liga o Kaggle continua podendo ligar a rapida.
+    const kept = pairing && pairing.topic === data.t && pairing.wake ? { wake: pairing.wake, wakeKey: pairing.wakeKey } : {};
+    pairing = { topic: data.t, key: data.k, ...kept };
+    if (/^https:\/\//.test(data.w || "") && data.wk) Object.assign(pairing, { wake: data.w, wakeKey: data.wk });
     store.set("pairing", pairing);
   }
   if (hasSession(data)) {
@@ -190,13 +199,16 @@ async function decrypt(message, keyText) {
 }
 
 const DISCOVER_EVERY = 20000;
+const DISCOVER_STARTING = 4000;  // com a GPU ligando, o anuncio pode chegar a qualquer momento
+const WAKE_TIMEOUT = 60000;
 let discovering = false;
 let lastDiscover = 0;
+let waking = false;
 
 /** O notebook anuncia o endereco da sessao, cifrado, num topico que so este navegador conhece. */
 async function discover(force = false) {
   if (!pairing || discovering || document.hidden) return;
-  if (!force && Date.now() - lastDiscover < DISCOVER_EVERY) return;
+  if (!force && Date.now() - lastDiscover < (starting() ? DISCOVER_STARTING : DISCOVER_EVERY)) return;
   lastDiscover = Date.now();
   discovering = true;
   try {
@@ -217,6 +229,41 @@ async function discover(force = false) {
   }
 }
 
+/** Liga a GPU rapida daqui: chama o endereco fixo que o atalho deixou no pareamento. A sessao
+ *  sobe no Modal e se anuncia como qualquer outra; esta pagina a encontra pela descoberta. */
+async function wake() {
+  if (waking || !pairing || !pairing.wake) return;
+  const error = $("#wake-error");
+  error.hidden = true;
+  waking = true;
+  renderGpu();
+  try {
+    const response = await fetch(pairing.wake, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: pairing.wakeKey }), signal: AbortSignal.timeout(WAKE_TIMEOUT),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(response.status === 403
+        ? "Este navegador não está mais autorizado a ligar a GPU. Rode de novo o atalho Ligar GPU rápida."
+        : `O Modal não ligou a GPU: ${data.detail || "erro " + response.status}`);
+    }
+    store.set("starting", Math.floor(Date.now() / 1000));
+    lastDiscover = 0;
+    renderStatus();
+    refreshForm();
+    discover(true);
+  } catch (failure) {
+    error.hidden = false;
+    error.textContent = failure.name === "TypeError" || failure.name === "TimeoutError"
+      ? "Não consegui falar com o Modal. Confira a internet e tente de novo."
+      : failure.message;
+  } finally {
+    waking = false;
+    renderGpu();
+  }
+}
+
 async function refreshStatus() {
   let next = null;
   if (reachable()) {
@@ -229,6 +276,11 @@ async function refreshStatus() {
     failures = 0;
     status = next;
     if (next.comfy) store.set("starting", null);  // chegou: nao esta mais "ligando"
+    if ((next.focus || "all") !== focus) {
+      focus = next.focus || "all";
+      store.set("focus", focus);
+      render();  // os cartoes mudam: o que leva a outro modo some ou volta
+    }
   } else if (++failures >= 2 || !status) {
     status = null;  // uma falha isolada nao derruba a tela; duas seguidas sim
   }
@@ -278,6 +330,10 @@ function renderGpu() {
   $("#gpu-on").hidden = !on;
   $("#gpu-off").hidden = on;
   if (!on) {
+    // Quem pareou pela GPU rapida a liga daqui, sem o atalho (e de qualquer aparelho).
+    $("#wake-box").hidden = !(pairing && pairing.wake);
+    $("#wake").disabled = waking || starting();
+    $("#wake").textContent = waking ? "Pedindo a máquina…" : starting() ? "Ligando… 1 a 2 minutos" : "Ligar a GPU rápida";
     $("#step-paired").hidden = !pairing;
     $("#step-code").hidden = Boolean(pairing);
     // Quem ainda nao pareou precisa do caminho manual a vista; depois ele so atrapalha.
@@ -290,16 +346,24 @@ function renderGpu() {
   }
 
   const rows = fact("Placa", status.gpu || "—");
-  for (const [name, label] of Object.entries(SET_NAMES)) {
-    const info = status.models[name];
-    const ok = Boolean(info && info.ok);
-    rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
-                      ok ? "yes" : "no"));
+  if (onlySwap()) {  // so o que a troca de pessoa usa
+    const swap = status.models.animate || {};
+    rows.push(...fact("Troca de pessoa", swap.ok ? "pronta" : status.extras ? "baixando" : "não instalada", swap.ok ? "yes" : "no"));
+    rows.push(...fact("Alta definição", swap.hd === "seedvr2" ? "restauração dos detalhes" : swap.hd ? "ampliação" : "indisponível",
+                      swap.hd ? "yes" : "no"));
+    rows.push(...fact("Movimento fluido", swap.rife ? "pronto" : "indisponível", swap.rife ? "yes" : "no"));
+  } else {
+    for (const [name, label] of Object.entries(SET_NAMES)) {
+      const info = status.models[name];
+      const ok = Boolean(info && info.ok);
+      rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
+                        ok ? "yes" : "no"));
+    }
+    const enhancer = status.enhancer;
+    const detail = enhancer.state === "error" || enhancer.state === "off" ? enhancer.detail : "";
+    rows.push(...fact("Melhorar prompt", ENHANCER_TEXT[enhancer.state] + (detail ? ` (${detail})` : ""),
+                      enhancer.state === "ready" ? "yes" : "no"));
   }
-  const enhancer = status.enhancer;
-  const detail = enhancer.state === "error" || enhancer.state === "off" ? enhancer.detail : "";
-  rows.push(...fact("Melhorar prompt", ENHANCER_TEXT[enhancer.state] + (detail ? ` (${detail})` : ""),
-                    enhancer.state === "ready" ? "yes" : "no"));
   if (status.extras) rows.push(...fact("Baixando", status.extras));
   $("#gpu-facts").replaceChildren(...rows);
 
@@ -466,25 +530,31 @@ function refreshEnhance() {
 
 /** Quanto a troca de pessoa deve levar, em minutos, com as escolhas atuais. Com duas GPUs o
  * video e gerado do meio para as pontas, dois pedacos por vez (veja app/stitch.py). */
-function swapMinutes() {
+function swapMinutes(quality = state.quality) {
   const frames = Number(state.length) * SWAP_FPS;
-  const hd = $("#hd").checked && !$("#hd-row").hidden;
+  // Quem ja gera em 720p (ultra) nao passa pela alta definicao.
+  const hd = $("#hd").checked && Boolean(status && status.models.animate && status.models.animate.hd) && quality !== "ultra";
   // Com a alta definicao, numa placa pequena, os pedacos sao de 49 quadros (o servidor decide).
   const small = !(online() && (status.vram || 0) >= ULTRA_MIN_VRAM);
-  const chunk = Math.min(SWAP_CHUNKS[state.quality] || SWAP_CHUNK, hd && small ? 49 : SWAP_CHUNK);
+  const chunk = Math.min(SWAP_CHUNKS[quality] || SWAP_CHUNK, hd && small ? 49 : SWAP_CHUNK);
   const stride = chunk - SWAP_OVERLAP;
   // Os pedacos saem um depois do outro, cada um continuando do anterior: o tempo acompanha
   // os quadros a gerar (um pedaco pequeno ainda custa uns 45% de um inteiro).
   const pieces = frames <= chunk ? Math.max(0.45, frames / chunk) : (frames - SWAP_OVERLAP) / stride;
   // O tempo de um pedaco menor que o de costume cai com os quadros dele, menos a parte fixa.
-  const usual = SWAP_CHUNKS[state.quality] || SWAP_CHUNK;
-  let seconds = SWAP_CHUNK_SECONDS[state.quality] * (0.25 + 0.75 * chunk / usual) * pieces;
+  const usual = SWAP_CHUNKS[quality] || SWAP_CHUNK;
+  let seconds = SWAP_CHUNK_SECONDS[quality] * (0.25 + 0.75 * chunk / usual) * pieces;
   if (hd) {
     // A restauracao vem depois, e nela as GPUs trabalham ao mesmo tempo (o Kaggle tem duas).
     const workers = status ? status.workers || 1 : 2;
     seconds += SWAP_HD_SECONDS * (chunk / 49) * pieces / workers;
   }
   return Math.max(1, Math.round(seconds / gpuSpeed() / 60));
+}
+
+/** "~14 min" ou "~1 h 20": o tempo estimado, curto o bastante para caber num botao. */
+function shortTime(minutes) {
+  return minutes < 60 ? `~${minutes} min` : `~${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")}`;
 }
 
 /** Quantas vezes a placa ligada e mais rapida que a T4 (1 para a T4 ou sem conexao). */
@@ -495,9 +565,14 @@ function gpuSpeed() {
 }
 
 function refreshForm() {
+  // Numa sessao so de troca de pessoa os outros modos nem aparecem.
+  $('[data-key="mode"]').hidden = onlySwap();
+  $("#focus-title").hidden = !onlySwap();
+  if (onlySwap() && state.mode !== "swap") choose("mode", "swap");
   const mode = state.mode;
   const image = mode === "img";
   const swap = mode === "swap";
+  $("#form").classList.toggle("swap", swap);  // a ordem dos campos muda (style.css)
 
   let ready;
   if (swap) {  // modelo fixo: o Animate
@@ -530,6 +605,7 @@ function refreshForm() {
   $('[data-frame="video"]').hidden = !swap;
   $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : "Frame inicial";
   $("#swap-options").hidden = !swap;
+  $("#swap-note").hidden = !swap;
   $("#prompt").placeholder = swap
     ? "Opcional: descreva a pessoa ou a cena…"
     : "Descreva a cena: quem aparece, onde, o que acontece, a luz…";
@@ -545,16 +621,28 @@ function refreshForm() {
   // Quem ja gera em 720p nao passa pela alta definicao (o arquivo nao ficaria maior).
   $("#hd-row").hidden = !(swap && info && info.hd) || state.quality === "ultra";
   $("#fluid-row").hidden = !(swap && info && info.rife);
-  $("#swap-estimate").textContent = swap
-    ? (gpuSpeed() === 1 ? "Tempo estimado na GPU gratuita" : "Tempo estimado nesta placa (conta ainda não conferida nela)")
-      + `: cerca de ${swapMinutes()} min. Pode deixar esta página aberta e voltar depois.`
-    : "";
+  if (swap) {
+    // Cada qualidade mostra quanto levaria com a duracao e a placa de agora.
+    for (const button of $$('[data-key="quality"] button')) {
+      const note = $("small", button);
+      note.textContent = `${note.dataset.note} · ${shortTime(swapMinutes(button.dataset.value))}`;
+    }
+    const minutes = swapMinutes();
+    // Numa maquina paga por tempo (a GPU rapida), o que o video gasta do credito.
+    const cost = online() && status.price_hour ? ` Gasta uns US$ ${(minutes / 60 * status.price_hour).toFixed(2)} do crédito.` : "";
+    $("#swap-estimate").textContent =
+      (gpuSpeed() === 1 ? "Tempo estimado na GPU gratuita" : "Tempo estimado nesta placa (conta ainda não conferida nela)")
+      + `: cerca de ${minutes} min.${cost} Pode deixar esta página aberta e voltar depois.`;
+  } else {
+    $("#swap-estimate").textContent = "";
+  }
   $("#duration-field").hidden = image;
   $("#start-field").hidden = !swap;
   $("#count-field").hidden = swap;
   $("#aspect-field").hidden = swap;
   $("#presets-field").hidden = swap;
   $("#swap-model").hidden = !swap;
+  $("#model-field").hidden = swap && onlySwap();  // um modelo so: nao ha o que mostrar
   $('[data-key="model"]').hidden = swap;
 
   // Imagem parada nao tem movimento de camera.
@@ -902,6 +990,7 @@ function describe(job) {
   if (job.mode === "swap") parts.push(job.replace === false ? "movimento copiado" : "pessoa trocada");
   if (job.hd) parts.push(job.hd_method === "seedvr2" ? "alta definição" : "ampliado");
   if (job.fluid) parts.push(`${job.out_fps} fps`);
+  if (job.cost) parts.push(`≈ US$ ${job.cost.toFixed(2)}`);  // tempo de maquina, na GPU paga por tempo
   for (const [key, list] of [["camera", presets.cameras], ["effect", presets.effects], ["style", presets.styles]]) {
     if (job[key] && job[key] !== "none") parts.push(nameOf(list, job[key]));
   }
@@ -1034,33 +1123,72 @@ function actionsFor(item) {
     const extension = item.kind === "image" ? "png" : "mp4";
     nodes.push(el("a", { href: item.url, download: `wan-${item.id}.${extension}`, textContent: "Baixar" }));
   }
-  nodes.push(actionButton("Reusar", () => reuse(item)));
-  if (item.local && item.kind === "image") {
+  // Numa sessao so de troca de pessoa, o que levaria a outro modo nao aparece.
+  if (!onlySwap() || item.mode === "swap") nodes.push(actionButton("Reusar", () => reuse(item)));
+  if (!onlySwap() && item.local && item.kind === "image") {
     nodes.push(actionButton("Animar", () => startFrom(item, async () => library.get(item.id).blob)));
   }
-  if (item.local && item.kind === "video") {
+  if (!onlySwap() && item.local && item.kind === "video") {
     nodes.push(actionButton("Continuar", () => startFrom(item, () => lastFrame(item.url))));
   }
   nodes.push(deleteButton(item));
   return nodes;
 }
 
-function openViewer(id) {
+let compareUrl = null;  // o video original aberto na comparacao, para soltar ao fechar
+
+/** O original e o resultado lado a lado, andando juntos: o resultado manda (tem os controles)
+ *  e o original o acompanha, a partir do ponto do video em que a troca comecou. */
+function compareMedia(item, original) {
+  const offset = Number(item.start) || 0;
+  compareUrl = URL.createObjectURL(original);
+  const before = el("video", { src: compareUrl, muted: true, playsInline: true, preload: "auto" });
+  const after = el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
+  const follow = () => {
+    const wanted = offset + after.currentTime;
+    if (Math.abs(before.currentTime - wanted) > 0.12) before.currentTime = wanted;
+  };
+  after.addEventListener("timeupdate", follow);
+  after.addEventListener("seeking", follow);
+  after.addEventListener("play", () => { follow(); before.play().catch(() => {}); });
+  after.addEventListener("pause", () => before.pause());
+  const pane = (label, video) => el("figure", { className: "compare-pane" }, video, el("figcaption", { textContent: label }));
+  const box = el("div", { className: "compare" }, pane("Original", before), pane("Resultado", after));
+  box.style.setProperty("--ratio", `${item.width} / ${item.height}`);
+  return box;
+}
+
+function releaseCompare() {
+  if (compareUrl) URL.revokeObjectURL(compareUrl);
+  compareUrl = null;
+}
+
+function openViewer(id, compare = false) {
   const stored = library.get(id);
   if (!stored) return;
   const item = { ...stored.job, status: "done", url: stored.url, local: true };
+  // A troca de pessoa guarda o video de origem (ate 25 MB): da para ver os dois lado a lado.
+  const original = item.mode === "swap" && stored.inputs && stored.inputs.video;
+  releaseCompare();
   const media = item.kind === "image"
     ? el("img", { src: item.url, alt: item.prompt })
-    : el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
+    : compare && original
+      ? compareMedia(item, original)
+      : el("video", { src: item.url, controls: true, autoplay: true, loop: true, playsInline: true });
   $("#viewer-media").replaceChildren(media);
   $("#viewer-prompt").textContent = titleOf(item);
   const final = $("#viewer-final");
   final.hidden = !item.final_prompt;
   final.textContent = item.final_prompt ? `Enviado ao modelo: ${item.final_prompt}` : "";
   $("#viewer-meta").textContent = describe(item);
-  $("#viewer-actions").replaceChildren(...actionsFor(item));
+  const actions = actionsFor(item);
+  if (original) {
+    actions.splice(1, 0, actionButton(compare ? "Ver só o resultado" : "Comparar com o original",
+                                      () => openViewer(id, !compare), "accent"));
+  }
+  $("#viewer-actions").replaceChildren(...actions);
   $("#viewer").dataset.id = id;
-  $("#viewer").showModal();
+  if (!$("#viewer").open) $("#viewer").showModal();
 }
 
 function renderCard(item) {
@@ -1106,13 +1234,17 @@ function galleryItems() {
 }
 
 function render() {
+  // Uma sessao so de troca de pessoa nao gera imagem: o filtro so aparece se a galeria ja as tem.
+  const images = [...library.values()].some((stored) => stored.job.kind === "image");
+  $('[data-key="filter"]').hidden = onlySwap() && !images;
+  if (onlySwap() && !images && state.filter !== "all") choose("filter", "all");
   const items = galleryItems();
   const gallery = $("#gallery");
   const seen = new Set();
   items.forEach((item, index) => {
     seen.add(item.id);
     // So redesenha o card quando algo mudou, para nao interromper um video tocando.
-    const signature = item.local ? "local" : `${item.status}|${waitText(item)}|${item.error || ""}`;
+    const signature = item.local ? `local|${focus}` : `${item.status}|${waitText(item)}|${item.error || ""}`;
     let entry = cards.get(item.id);
     if (!entry || entry.signature !== signature) {
       const node = renderCard(item);
@@ -1130,9 +1262,13 @@ function render() {
   }
   const empty = $("#empty");
   empty.hidden = items.length > 0;
-  empty.textContent = state.filter === "all" || !library.size
-    ? "Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo."
-    : "Nada neste filtro.";
+  const nothing = state.filter === "all" || !library.size;
+  empty.textContent = !nothing ? "Nada neste filtro."
+    : onlySwap() ? "Nada por aqui ainda. Envie a foto da pessoa e o vídeo para começar."
+      : "Nada por aqui ainda. O que você quer criar?";
+  // Na pagina so de troca de pessoa, os tres passos; na do estudio inteiro, um cartao por modo.
+  $("#starter").hidden = items.length > 0 || !nothing || onlySwap();
+  $("#howto").hidden = items.length > 0 || !nothing || !onlySwap();
 }
 
 // ---------------------------------------------------------------- inicio
@@ -1164,6 +1300,7 @@ function bindUi() {
   });
 
   $("#status").addEventListener("click", openGpu);
+  $("#wake").addEventListener("click", wake);
   $("#connect-go").addEventListener("click", tryConnect);
   $("#connect-code").addEventListener("keydown", (event) => {
     if (event.key === "Enter") tryConnect();
@@ -1197,7 +1334,18 @@ function bindUi() {
     $("#status").textContent = "Desligando a GPU…";
   });
 
-  $("#viewer").addEventListener("close", () => $("#viewer-media").replaceChildren());
+  $("#viewer").addEventListener("close", () => {
+    $("#viewer-media").replaceChildren();
+    releaseCompare();
+  });
+  // Os cartoes da galeria vazia: cada um leva ao modo dele.
+  $("#starter").addEventListener("click", (event) => {
+    const card = event.target.closest("[data-start]");
+    if (!card) return;
+    choose("mode", card.dataset.start);
+    refreshForm();
+    $("#form").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
     document.title = baseTitle;
@@ -1229,6 +1377,8 @@ async function init() {
   await refreshStatus();
   pollJobs();
   setInterval(refreshStatus, STATUS_EVERY);
+  // Com a GPU ligando, a procura pelo anuncio nao espera a proxima leitura de estado.
+  setInterval(() => { if (SITE && !status && starting()) discover(); }, DISCOVER_STARTING);
 }
 
 init();

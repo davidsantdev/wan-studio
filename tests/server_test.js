@@ -34,6 +34,8 @@ const serverJobs = async () => (await (await fetch(`${BASE}/api/jobs`)).json()).
 
   await page.goto(BASE + "/");
   await page.waitForFunction(() => document.querySelector("#status").dataset.state === "ok", null, { timeout: 20000 });
+  // A pagina abre na troca de pessoa; este servidor oferece todos os modos, e as abas aparecem.
+  await page.click('[data-key="mode"] [data-value="t2v"]');
   check("S1 mesma origem: conecta sem codigo", (await text("#status")).includes("NVIDIA L40S · 45 GB") && await page.evaluate(() => window.WAN_SITE === undefined));
   check("S2 miniaturas trazem icone de movimento", (await count("#cameras .thumb-icon")) >= 30, String(await count("#cameras .thumb-icon")));
   const box = await page.evaluate(() => {

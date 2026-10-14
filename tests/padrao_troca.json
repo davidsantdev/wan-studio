@@ -1,0 +1,76 @@
+{
+ "listas": {
+  "unet": [
+   "seedvr2_3b_fp8_e4m3fn.safetensors"
+  ],
+  "gguf": [
+   "Wan2.2-Animate-14B-Q4_K_S.gguf"
+  ],
+  "vae": [
+   "wan_2.1_vae.safetensors",
+   "seedvr2_ema_vae_fp16.safetensors"
+  ],
+  "clip": [
+   "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
+  ],
+  "clip_vision": [
+   "clip_vision_h.safetensors"
+  ],
+  "lora": [
+   "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+   "WanAnimate_relight_lora_fp16.safetensors"
+  ],
+  "detection": [
+   "vitpose-l-wholebody.onnx",
+   "yolov10m.onnx"
+  ],
+  "upscale": [
+   "RealESRGAN_x2plus.pth"
+  ],
+  "frame_interpolation": [
+   "rife_v4.25.safetensors"
+  ],
+  "vram": 15.0
+ },
+ "casos": {
+  "boa": {
+   "quality": "boa"
+  },
+  "rapida": {
+   "quality": "rapida"
+  },
+  "maxima com alta definicao": {
+   "quality": "maxima",
+   "hd": true
+  },
+  "boa com movimento fluido": {
+   "quality": "boa",
+   "fluid": true
+  },
+  "boa sem manter o cenario": {
+   "quality": "boa",
+   "replace": false
+  },
+  "boa com ampliacao simples": {
+   "quality": "boa",
+   "hd": true,
+   "expert": {
+    "hd_method": "esrgan"
+   }
+  }
+ },
+ "grafos": {
+  "boa": "501d79c1ea98e209",
+  "boa, continuando": "650ab032935ebc8c",
+  "rapida": "501d79c1ea98e209",
+  "rapida, continuando": "650ab032935ebc8c",
+  "maxima com alta definicao": "501d79c1ea98e209",
+  "maxima com alta definicao, continuando": "650ab032935ebc8c",
+  "boa com movimento fluido": "790d754839aa5734",
+  "boa com movimento fluido, continuando": "a8e901bef285b113",
+  "boa sem manter o cenario": "8b4648c5fb69eb8f",
+  "boa sem manter o cenario, continuando": "ae3aa9a2a1477bd3",
+  "boa com ampliacao simples": "10deee76929f421c",
+  "boa com ampliacao simples, continuando": "9e658de7114595e2"
+ }
+}

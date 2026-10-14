@@ -17,12 +17,13 @@
   <main class="layout">
     <form id="form" class="panel" autocomplete="off">
       <div class="panel-scroll">
+      <h1 id="focus-title" class="panel-title" hidden>Trocar pessoa em vídeo</h1>
       <div class="tabs" data-key="mode" role="tablist">
+        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
         <button type="button" class="tab" role="tab" data-value="t2v">Texto → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="i2v">Imagem → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="flf">Início + Fim</button>
         <button type="button" class="tab" role="tab" data-value="img">Imagem</button>
-        <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
       </div>
       <p id="mode-note" class="note warn" hidden></p>
 
@@ -46,18 +47,18 @@
           <button type="button" class="drop-clear" hidden aria-label="Remover vídeo">×</button>
         </label>
       </div>
+      <p id="swap-note" class="note" hidden>A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
       <div id="swap-options" class="field" hidden>
-        <p class="note">A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
         <label class="check">
           <input type="checkbox" id="replace" checked>
           <span>Manter o cenário do vídeo (desmarque para a pessoa só copiar os movimentos, no cenário da própria imagem)</span>
         </label>
         <span class="field-title">Qualidade</span>
         <div class="segmented" data-key="quality">
-          <button type="button" data-value="rapida">Rápida<small>menor, ampliada</small></button>
-          <button type="button" data-value="boa">Boa<small>480p</small></button>
-          <button type="button" data-value="maxima">Máxima<small>576p</small></button>
-          <button type="button" data-value="ultra" hidden>Ultra<small>720p direto</small></button>
+          <button type="button" data-value="rapida">Rápida<small data-note="menor, ampliada">menor, ampliada</small></button>
+          <button type="button" data-value="boa">Boa<small data-note="480p">480p</small></button>
+          <button type="button" data-value="maxima">Máxima<small data-note="576p">576p</small></button>
+          <button type="button" data-value="ultra" hidden>Ultra<small data-note="720p direto">720p direto</small></button>
         </div>
         <label class="check" id="hd-row" hidden>
           <input type="checkbox" id="hd">
@@ -70,7 +71,7 @@
         <p id="swap-estimate" class="note"></p>
       </div>
 
-      <div class="field">
+      <div class="field" id="prompt-field">
         <div class="field-head">
           <label class="field-title" for="prompt">Prompt</label>
           <button type="button" id="enhance" class="link" hidden>Melhorar com IA</button>
@@ -93,7 +94,7 @@
         <div id="styles" class="chips" data-key="style" hidden></div>
       </section>
 
-      <section class="field">
+      <section class="field" id="model-field">
         <span class="field-title">Modelo</span>
         <p id="swap-model" class="fixed-choice" hidden>Wan 2.2 Animate<small>troca de pessoa · 16 fps</small></p>
         <div class="segmented" data-key="model">
@@ -124,7 +125,7 @@
         </section>
       </div>
 
-      <div class="row">
+      <div class="row" id="timing-row">
         <section class="field" id="duration-field">
           <span class="field-title">Duração</span>
           <div class="segmented compact" data-key="duration">
@@ -183,7 +184,37 @@
       </div>
       <p id="gallery-note" class="note"></p>
       <div id="gallery" class="gallery"></div>
-      <p id="empty" class="empty" hidden>Nada por aqui ainda. Escreva um prompt, escolha um movimento de câmera e gere o primeiro vídeo.</p>
+      <p id="empty" class="empty" hidden>Nada por aqui ainda. O que você quer criar?</p>
+      <ol id="howto" class="starter howto" hidden>
+        <li class="starter-card"><span class="step">1</span><b>Envie a foto da pessoa</b>
+          <small>De frente e bem iluminada; de corpo inteiro se o vídeo mostra o corpo inteiro.</small></li>
+        <li class="starter-card"><span class="step">2</span><b>Envie o vídeo</b>
+          <small>Até 100 MB. Escolha um trecho que comece com a pessoa de frente.</small></li>
+        <li class="starter-card"><span class="step">3</span><b>Clique em Trocar pessoa</b>
+          <small>O vídeo sai com os mesmos movimentos, o mesmo cenário e o áudio original, e fica guardado aqui.</small></li>
+      </ol>
+      <div id="starter" class="starter" hidden>
+        <button type="button" class="starter-card" data-start="swap">
+          <span class="starter-art art-swap" aria-hidden="true"><i></i><i></i></span>
+          <b>Trocar pessoa</b>
+          <small>A pessoa de uma foto entra no lugar da pessoa de um vídeo, com os mesmos movimentos e o mesmo cenário.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="i2v">
+          <span class="starter-art art-i2v" aria-hidden="true"><i></i></span>
+          <b>Imagem → Vídeo</b>
+          <small>Dê vida a uma imagem: movimento de câmera, efeito e estilo à sua escolha.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="t2v">
+          <span class="starter-art art-t2v" aria-hidden="true"><i></i><i></i><i></i></span>
+          <b>Texto → Vídeo</b>
+          <small>Descreva a cena e escolha entre 36 movimentos de câmera.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="img">
+          <span class="starter-art art-img" aria-hidden="true"><i></i></span>
+          <b>Imagem</b>
+          <small>Gere a imagem de partida e anime depois com um clique.</small>
+        </button>
+      </div>
     </section>
   </main>
 
@@ -195,10 +226,15 @@
       </div>
 
       <section id="gpu-off" class="dialog-section">
-        <p class="lead">Os vídeos são gerados numa GPU gratuita (do Kaggle ou do Lightning AI), que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <p class="lead">Os vídeos são gerados numa GPU que só fica ligada enquanto você usa. Sua galeria continua salva aqui com ela desligada.</p>
+        <div id="wake-box" class="dialog-section" hidden>
+          <button type="button" id="wake" class="generate">Ligar a GPU rápida</button>
+          <p class="note">Liga em 1 a 2 minutos, daqui mesmo, e se desliga sozinha quando você para de usar. Gasta o crédito mensal da sua conta do Modal só enquanto está ligada.</p>
+          <p id="wake-error" class="error" role="alert" hidden></p>
+        </div>
         <ol class="steps">
-          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU</b> (Kaggle) ou em <b>Ligar GPU (Lightning)</b> (placa maior, para a qualidade Ultra).</li>
-          <li>Espere esta página conectar sozinha: uns 5 minutos, ou bem mais quando o Kaggle está cheio e deixa a máquina numa fila.</li>
+          <li>No seu computador, abra a pasta do Wan Studio e dê dois cliques em <b>Ligar GPU rápida</b> (Modal: troca de pessoa em minutos) ou em <b>Ligar GPU</b> (Kaggle: sem custo nenhum, mais lenta).</li>
+          <li>Espere esta página conectar sozinha: 1 a 2 minutos na rápida; uns 5 no Kaggle, ou bem mais quando ele está cheio e deixa a máquina numa fila.</li>
         </ol>
         <details id="manual" class="manual">
           <summary>Ligar pelo site do Kaggle</summary>

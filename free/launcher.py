@@ -35,8 +35,12 @@ TUNNEL_CHECK_EVERY = 120
 REPORT_EVERY = 300
 POSIX = os.name == "posix"
 
+# "external": o endereco publico veio de fora (nuvem/sessao.py abre o tunel pelo Modal) e nao
+# ha cloudflared para vigiar. "tick": chamada a cada volta do `keepalive`, com o estado do
+# servidor (ou None), para quem hospeda a sessao registrar que ela esta viva.
 SESSION = {"procs": {}, "url": None, "password": None, "site": "", "idle_minutes": 0,
-           "announced": 0.0, "announce_failed": False, "workers": 1, "args": {}}
+           "announced": 0.0, "announce_failed": False, "workers": 1, "args": {},
+           "external": False, "tick": None}
 
 
 def load_pairing():
@@ -144,7 +148,8 @@ def internet_problem():
 
 
 def install():
-    """Instala o ComfyUI e baixa o conjunto minimo (Wan 2.2 5B). Leva uns 4 minutos no Kaggle."""
+    """Instala o ComfyUI e baixa o conjunto minimo (Wan 2.2 5B; na sessao so de troca de pessoa,
+    o que os modelos dela tem em comum). Leva uns 4 minutos no Kaggle."""
     problem = internet_problem()
     if problem is not None:
         raise SystemExit(
@@ -236,6 +241,8 @@ def enhancer_gpu():
     """A GPU em que o melhorador de prompt vai rodar (a mesma regra de app/enhancer.py), ou
     -1. O servidor precisa saber: o ComfyUI dessa GPU e o melhorador se revezam nela."""
     choice = os.environ.get("ENHANCER_DEVICE", "auto")
+    if os.environ.get("SO_TROCA"):  # a sessao so troca pessoa: as duas GPUs ficam para o video
+        return -1
     if choice.startswith("cuda:"):
         return int(choice[5:])
     return 1 if choice == "auto" and SESSION["workers"] >= 2 else -1
@@ -245,6 +252,8 @@ def start_studio():
     spawn("studio", [sys.executable, "server.py"], ROOT / "app",
           APP_PASSWORD=SESSION["password"], IDLE_MINUTES=str(SESSION["idle_minutes"]),
           WAN_MANAGED="1", PORT=str(STUDIO_PORT), ENHANCER_WORKER=str(enhancer_gpu()),
+          # So muda onde o tunel chega pela rede do conteiner em vez de pelo proprio processo.
+          HOST=os.environ.get("WAN_STUDIO_HOST", "127.0.0.1"),
           COMFY_DIR=str(ROOT / "ComfyUI"),
           COMFY_URLS=",".join(worker_url(index) for index in range(SESSION["workers"])))
     for _ in range(30):
@@ -344,17 +353,21 @@ def banner():
     print(line + "\n")
 
 
-def start(site_url="", idle_minutes=60):
-    """Sobe ComfyUI, Wan Studio e tunel, e mostra como conectar."""
+def start(site_url="", idle_minutes=60, tunnel_url=None):
+    """Sobe ComfyUI, Wan Studio e tunel, e mostra como conectar. Com `tunnel_url`, o endereco
+    publico ja existe (quem chama abriu o tunel) e o cloudflared nao entra."""
     stop(quiet=True)
     SESSION.update(password=secrets.token_urlsafe(12), site=site_url or PAIRING.get("site", ""),
-                   idle_minutes=idle_minutes, url=None)
+                   idle_minutes=idle_minutes, url=None, external=bool(tunnel_url))
     print("Iniciando o ComfyUI...")
     start_comfy()
     start_studio()
     start_extras()
-    print("Abrindo o túnel...")
-    start_tunnel()
+    if tunnel_url:
+        SESSION["url"] = tunnel_url.rstrip("/")
+    else:
+        print("Abrindo o túnel...")
+        start_tunnel()
     announce()
     banner()
 
@@ -423,7 +436,11 @@ def keepalive():
             last_tunnel_check = time.time()
             reachable = http_ok(f"{SESSION['url']}/api/presets", SESSION["password"], timeout=15)
             tunnel_misses = 0 if reachable is not None else tunnel_misses + 1
-        if not alive("tunnel") or tunnel_misses >= 3:
+        if SESSION["external"]:
+            if tunnel_misses == 3:  # nao ha o que reabrir daqui: fica o aviso, uma vez
+                tunnel_misses += 1
+                print("(aviso: o endereço público não responde; a sessão segue no ar por dentro)")
+        elif not alive("tunnel") or tunnel_misses >= 3:
             print("O túnel caiu; abrindo outro...")
             if "tunnel" in SESSION["procs"]:
                 kill(SESSION["procs"]["tunnel"])
@@ -438,6 +455,8 @@ def keepalive():
             print("Downloads extras: " + tail("extras", 6).replace("\n", "\n  "))
 
         info = http_ok(f"{STUDIO_URL}/api/status", SESSION["password"])
+        if SESSION["tick"]:
+            SESSION["tick"](info)
         if info:
             idle = info["idle"]
             if info.get("shutdown"):

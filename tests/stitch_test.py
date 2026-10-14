@@ -52,6 +52,59 @@ def plan_ok(total, chunk, overlap, seed):
     return ""
 
 
+def chains_ok(total, chunk, overlap, anchor):
+    """Confere as regras de um plano em duas cadeias; devolve "" ou o que esta errado."""
+    single = stitch.plan(total, chunk, overlap)
+    pieces = stitch.chains(total, chunk, overlap, anchor=anchor)
+    if pieces == single:  # video curto, ou sem ganho que compense: vale o plano de uma cadeia
+        return ""
+    seeds = [index for index, piece in enumerate(pieces) if piece["after"] is None]
+    if len(seeds) != 2 or seeds[0] != 0:
+        return "precisa de duas cadeias, a primeira no comeco"
+    second = pieces[seeds[1]]
+    lead = overlap + stitch.SETTLE if anchor else 0
+    if second.get("blend") != stitch.BLEND or second.get("skip", -1) < lead or second.get("skip") > lead + 3:
+        return "comeco da segunda cadeia sem a mistura ou sem os quadros de acomodacao"
+    if second.get("anchor") != (0 if anchor else None):
+        return "ancora errada"
+    if anchor:
+        source, first = stitch.anchored(pieces, seeds[1], overlap)
+        if source != 0 or not 0 <= first <= pieces[0]["length"] - overlap:
+            return "a ancora copia quadros que o primeiro pedaco nao tem"
+    for index, piece in enumerate(pieces):
+        if piece["length"] % 4 != 1 or not 17 <= piece["length"] <= chunk + stitch.STRETCH or piece["start"] < 0:
+            return f"pedaco {index} com tamanho invalido"
+        if piece["reverse"] or (piece["after"] is not None and piece["after"] != index - 1):
+            return f"pedaco {index} nao avanca a partir do anterior"
+    if pieces[-1]["start"] + pieces[-1]["length"] != total:
+        return "nao cobre o video ate o fim"
+    spans = stitch.bounds(pieces, overlap)
+    for index, (a, b) in enumerate(zip(spans, spans[1:])):
+        shared = a[1] - b[0]
+        if shared != (stitch.BLEND if index + 1 == seeds[1] else 0):
+            return f"emenda {index} com {shared} quadros em comum"
+    if spans[0][0] != 0 or spans[-1][1] != total:
+        return "trechos nao cobrem o video"
+    if chain_time(pieces, anchor) > stitch.CHAIN_GAIN * stitch._cost(single):
+        return "duas cadeias sem ganho de tempo sobre uma"
+    return ""
+
+
+def chain_time(pieces, anchor):
+    """Quanto as duas cadeias levam, na mesma conta do plano: a segunda, com ancora, espera o
+    primeiro pedaco da primeira."""
+    split = next((index for index, piece in enumerate(pieces) if piece.get("blend")), len(pieces))
+    wait = stitch._cost(pieces[:1]) if anchor and split < len(pieces) else 0
+    return max(stitch._cost(pieces[:split]), wait + stitch._cost(pieces[split:]))
+
+
+def read_blues(path):
+    """O azul medio de cada quadro: em `make_fine` ele diz de que pedaco o quadro veio."""
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(path), "-vf", "scale=1:1:flags=area",
+                          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    return [raw[at + 2] for at in range(0, len(raw) - 2, 3)]
+
+
 def frame_color(number):
     """Uma cor por quadro do video, facil de reconhecer depois (so o vermelho varia)."""
     return (20 + number * 2 % 200, 90, 160)
@@ -241,6 +294,84 @@ async def main():
     worst = max(abs(red - (20 + number)) for number, red in enumerate(reds))
     check("F5 com intermediarios a cor entre pedacos tambem e corrigida", count == factor * (total - 1) + 1 and worst <= 6,
           f"{count} quadros, maior erro {worst}")
+
+    # ---- duas cadeias que avancam: o plano
+    problems = []
+    for anchor in (True, False):
+        for chunk in (49, 77):
+            for total in list(range(1, 500)) + [961, 1500]:
+                problem = chains_ok(total, chunk, 5, anchor)
+                if problem:
+                    problems.append(f"total={total} chunk={chunk} ancora={anchor}: {problem}")
+    check("D1 plano em duas cadeias valido para todo tamanho de video, com e sem ancora", not problems,
+          "; ".join(problems[:3]))
+    two = stitch.chains(376, 49, 5)
+    one = stitch.plan(376, 49, 5)
+    start_two = next(index for index, piece in enumerate(two) if piece.get("blend"))
+    ratio = chain_time(two, True) / stitch._cost(one)
+    check("D2 o video de 23,5 s (9 pedacos de 49): 5 numa cadeia e 4 na outra, que parte do primeiro pedaco, "
+          "em 60% do tempo",
+          len(one) == 9 and start_two == 5 and len(two) - start_two == 4 and two[start_two]["anchor"] == 0
+          and 5 + stitch.SETTLE <= two[start_two]["skip"] <= 8 + stitch.SETTLE and ratio < 0.62,
+          f"{ratio:.0%}; {[(p['start'], p['length']) for p in two[start_two - 1:start_two + 1]]}")
+    whole = stitch._cost(stitch.plan(160, 77, 5))
+    tied, free = chain_time(stitch.chains(160, 77, 5), True) / whole, chain_time(stitch.chains(160, 77, 5, anchor=False), False) / whole
+    check("D3 10 s em pedacos de 77: com ancora a segunda cadeia espera o primeiro pedaco e o tempo cai a uns 3/4; "
+          "sem ela, as duas GPUs comecam juntas e ele cai a perto da metade",
+          0.7 < tied < 0.8 and 0.5 < free < 0.6, f"{tied:.0%} e {free:.0%}")
+    check("D3b video que cabe num pedaco: com ancora nao ha o que dividir; sem ela, meio video para cada GPU",
+          stitch.chains(80, 77, 5) == stitch.plan(80, 77, 5)
+          and [piece["after"] for piece in stitch.chains(80, 77, 5, anchor=False)] == [None, None])
+
+    # ---- duas cadeias: a emenda. O azul diz o pedaco; vermelho e verde, a posicao do quadro
+    # (ate 224: por isso o video com intermediarios e mais curto).
+    for factor, label in ((1, "D4"), (2, "D5")):
+        total = 150 if factor == 1 else 110
+        pieces = stitch.chains(total, 49, 5)
+        seam = next(index for index, piece in enumerate(pieces) if piece.get("blend"))
+        marked = []
+        for index, piece in enumerate(pieces):
+            folder = WORK / f"cadeia{factor}_{index}"
+            make_fine(folder, piece, factor, index, None)
+            marked.append({**piece, "pattern": str(folder / "%05d.png")})
+        stitch.color_fixes = no_fixes
+        try:
+            await stitch.stitch(marked, WORK / f"cadeias{factor}.mp4", 8, 5, (64, 48), factor=factor)
+        finally:
+            stitch.color_fixes = real_fixes
+        marks = read_marks(WORK / f"cadeias{factor}.mp4")
+        blues = read_blues(WORK / f"cadeias{factor}.mp4")
+        wrong = [number for number, (position, _) in enumerate(marks) if position != number]
+        first = factor * (pieces[seam]["start"] + pieces[seam]["skip"])   # onde a mistura comeca
+        mixed = factor * (stitch.BLEND - 1) + 1
+        before, after = 40 + 40 * (seam - 1), 40 + 40 * seam
+        ramp = blues[first:first + mixed]
+        check(f"{label} duas cadeias{' com intermediarios' if factor > 1 else ''}: todos os quadros no lugar, e na "
+              "emenda entre elas uma vira a outra aos poucos",
+              len(marks) == factor * (total - 1) + 1 and not wrong
+              and abs(blues[first - 1] - before) <= 3 and abs(blues[first + mixed] - after) <= 3
+              and abs(ramp[0] - before) <= 3 and all(a <= b + 1 for a, b in zip(ramp, ramp[1:]))
+              and before + 8 < ramp[len(ramp) // 2] < after - 8,
+              f"{len(marks)} quadros; fora do lugar {wrong[:4]}; azul na mistura {ramp}")
+
+    # A cor: a segunda cadeia sai mais clara que a primeira; nos quadros que as duas geraram
+    # da para medir a diferenca direto.
+    pieces = stitch.chains(150, 49, 5)
+    seam = next(index for index, piece in enumerate(pieces) if piece.get("blend"))
+    tinted = []
+    for index, piece in enumerate(pieces):
+        folder = WORK / f"tom{index}"
+        make_fine(folder, piece, 1, index, 0 if index < seam else 14)
+        tinted.append({**piece, "pattern": str(folder / "%05d.png")})
+    make_fine(WORK / "tom_entrada", {"start": 0, "length": 150}, 1, 0, 0)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", "16", "-i", str(WORK / "tom_entrada" / "%05d.png"),
+                    "-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p", str(WORK / "tom_entrada.mp4")], check=True)
+    fixes = await stitch.stitch(tinted, WORK / "tom.mp4", 16, 5, (64, 48), original=WORK / "tom_entrada.mp4")
+    reds, count = read_reds(WORK / "tom.mp4", 150)
+    worst = max(abs(red - (20 + number)) for number, red in enumerate(reds))
+    check("D6 a cor da segunda cadeia e trazida a da primeira pelos quadros que as duas tem",
+          count == 150 and worst <= 6 and fixes[seam][0][1] < -8 and fixes[seam - 1] == [stitch.NEUTRAL] * 3,
+          f"{count} quadros, maior erro {worst}; deslocamento {round(fixes[seam][0][1], 1)}")
 
     print(f"\n{len(failures)} falha(s)" + (": " + "; ".join(failures) if failures else ""))
     return 1 if failures else 0

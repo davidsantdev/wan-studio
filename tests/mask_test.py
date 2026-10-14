@@ -122,6 +122,351 @@ def main():
     old = node.WanStudioPersonMask().prompts("caixas", [front] * 12, 12, 480, 832, 6, None)
     check("R12 'caixas' continua como era: um objeto so", {obj for _index, obj, _points, _box in old} == {1})
 
+    # O recorte da imagem da pessoa (ref=crop): a caixa dela, na proporcao do quadro de geracao.
+    # Corpo inteiro numa imagem quadrada de 1000 px, para um quadro em pe de 480 x 832: antes,
+    # a imagem inteira com faixas pretas (a pessoa com 52% da altura do quadro).
+    crop = node.fit_crop((350, 50, 650, 950), 1000, 1000, 480, 832)
+    ratio = (crop[2] - crop[0]) / (crop[3] - crop[1])
+    check("F1 corpo inteiro em imagem quadrada: recorte na proporcao do quadro, com a pessoa dentro",
+          crop is not None and abs(ratio - 480 / 832) < 0.01
+          and crop[0] <= 350 and crop[1] <= 50 and crop[2] >= 650 and crop[3] >= 950, str(crop))
+    crop = node.fit_crop((100, 100, 400, 700), 2000, 1000, 832, 480)
+    check("F2 pessoa em pe num quadro deitado: recorte mais largo, ainda com a pessoa inteira",
+          crop is not None and abs((crop[2] - crop[0]) / (crop[3] - crop[1]) - 832 / 480) < 0.02
+          and crop[0] <= 100 and crop[1] <= 100 and crop[2] >= 400 and crop[3] >= 700, str(crop))
+    # Imagem estreita demais para a proporcao: o recorte pega a pessoa inteira e as faixas
+    # pretas ficam dos lados, como antes, mas ela ja ocupa a altura toda do quadro.
+    crop = node.fit_crop((100, 100, 400, 700), 1000, 1000, 832, 480)
+    check("F2b imagem estreita: recorte limitado pela imagem, com a pessoa inteira",
+          crop is not None and crop[0] == 0 and crop[2] == 1000 and crop[1] <= 100 and crop[3] >= 700, str(crop))
+    # Pessoa encostada no canto: o recorte desliza para dentro da imagem, sem sair dela.
+    crop = node.fit_crop((0, 0, 200, 400), 1000, 1000, 480, 832)
+    check("F3 pessoa no canto: o recorte fica dentro da imagem e a contem",
+          crop is not None and crop[0] == 0 and crop[1] == 0 and crop[2] >= 200 and crop[3] >= 400
+          and crop[2] <= 1000 and crop[3] <= 1000, str(crop))
+    # Quase a imagem toda, ou caixa invalida: nada a recortar.
+    check("F4 pessoa que ja enche a imagem, ou caixa invalida: sem recorte",
+          node.fit_crop((5, 5, 995, 995), 1000, 1000, 640, 640) is None
+          and node.fit_crop((10, 10, 12, 12), 1000, 1000, 640, 640) is None)
+    # Pessoa minuscula: nao ampliar alem do dobro (borraria o que a imagem tem).
+    crop = node.fit_crop((480, 480, 520, 540), 2000, 2000, 640, 640)
+    check("F5 pessoa pequena num quadro grande: o recorte nao passa a ser menor que a metade do quadro",
+          crop is not None and crop[2] - crop[0] >= 320 and crop[3] - crop[1] >= 320, str(crop))
+    # Imagem estreita: o recorte nao inventa o que nao ha, ficam as faixas pretas no que falta.
+    crop = node.fit_crop((20, 300, 180, 700), 200, 1000, 1000, 400)
+    check("F6 imagem mais estreita que o quadro: o recorte nao sai da imagem e contem a pessoa",
+          crop is not None and crop[0] == 0 and crop[2] == 200 and 0 <= crop[1] <= 300 and 700 <= crop[3] <= 1000,
+          str(crop))
+    check("F6b pessoa que ocupa a imagem estreita toda: sem recorte",
+          node.fit_crop((20, 50, 180, 950), 200, 1000, 1000, 400) is None)
+
+    # O no: a uniao da caixa dos pontos com a do detector; sem pessoa, devolve a imagem.
+    class Image:  # no lugar do tensor: so o formato e o corte importam aqui
+        shape = (1, 1000, 1000, 3)
+        sliced = None
+
+        def __getitem__(self, item):
+            Image.sliced = item
+            return "cortada"
+
+    legs = {"keypoints_body": body(**{"0": (0.5, 0.1), "1": (0.5, 0.2), "10": (0.45, 0.95), "13": (0.55, 0.95)})}
+    fitter = node.WanStudioFitReference()
+    image = Image()
+    check("F7 com pose ou caixa do detector, a imagem e recortada",
+          fitter.fit(image, {"pose_metas_original": [legs]}, 480, 832)[0] == "cortada"
+          and fitter.fit(image, {"pose_metas_original": []}, 480, 832, [(300, 100, 700, 950)])[0] == "cortada")
+    check("F8 sem pose nem caixa, a imagem sai como entrou",
+          fitter.fit(image, {"pose_metas_original": []}, 480, 832)[0] is image
+          and fitter.fit(image, {"pose_metas_original": []}, 480, 832, [(0, 0, 0, 0)])[0] is image)
+
+    # O grafo: o padrao nao muda; com ref=crop entram a pose da imagem e o no de recorte, e o
+    # carregador de modelos de pose e um so.
+    sys.path.insert(0, str(ROOT / "app"))
+    import workflows
+    files = {"clip": "umt5.safetensors", "vae": "vae.safetensors", "unet": "Wan2.2-Animate-14B-Q4_K_M.gguf",
+             "lora": "lightx2v.safetensors", "relight": "relight.safetensors", "clip_vision": "cv.safetensors",
+             "vitpose": "vp.onnx", "yolo": "y.onnx"}
+
+    def graph(ref):
+        spec = workflows.resolve({"mode": "swap", "quality": "boa", "seed": 1, "expert": {"ref": ref}}, True, False, True)
+        spec.update(width=480, height=832, length=49, chunk=49)
+        nodes = workflows.build(spec, files, "p", "n", "x", start_image="person.png", video="v.mp4")[0]
+        types = [item["class_type"] for item in nodes.values()]
+        pad = next(item for item in nodes.values() if item["class_type"] == "ResizeAndPadImage")
+        return nodes, types, nodes[pad["inputs"]["image"][0]]["class_type"]
+
+    _nodes, types, feeds = graph("pad")
+    check("W1 padrao (ref=pad): a imagem entra inteira no encaixe, sem o no de recorte",
+          feeds == "LoadImage" and "WanStudioFitReference" not in types and types.count("PoseAndFaceDetection") == 1)
+    nodes, types, feeds = graph("crop")
+    detectors = {tuple(item["inputs"]["model"]) for item in nodes.values() if item["class_type"] == "PoseAndFaceDetection"}
+    check("W2 ref=crop: a imagem passa pela pose e pelo recorte antes do encaixe, com um carregador so",
+          feeds == "WanStudioFitReference" and types.count("PoseAndFaceDetection") == 2
+          and types.count("OnnxDetectionModelLoader") == 1 and len(detectors) == 1, str(types.count("OnnxDetectionModelLoader")))
+    try:
+        workflows.resolve({"mode": "swap", "expert": {"ref": "zoom"}}, True, False, True)
+        refused = False
+    except ValueError:
+        refused = True
+    check("W3 ajuste de recorte desconhecido e recusado", refused)
+
+    # Sem ajuste de teste nenhum, o grafo de um pedaco e, no por no, o do codigo que foi medido
+    # na GPU (tests/padrao_troca.json guarda um resumo de cada um; quem mudar um padrao de
+    # proposito, depois de medir, refaz o arquivo).
+    import hashlib
+    import json
+    golden = json.loads((ROOT / "tests" / "padrao_troca.json").read_text(encoding="utf-8"))
+    changed = []
+    for label, params in golden["casos"].items():
+        for motion in (None, "continua.mp4"):
+            found = workflows.available({**golden["listas"], "nodes": workflows.CATALOG["animate"]["nodes"]})["animate"]["files"]
+            spec = workflows.resolve({"mode": "swap", "seed": 3, **params}, True, False, True)
+            spec.update(width=832, height=480, length=49)
+            spec["factor"] = workflows.smooth_factor(spec, found)
+            built = workflows.build(spec, found, "p", "n", "job_000", start_image="pessoa.png", video="pedaco.mp4", motion=motion)[0]
+            name = label + (", continuando" if motion else "")
+            if hashlib.sha256(json.dumps(built, sort_keys=True).encode()).hexdigest()[:16] != golden["grafos"][name]:
+                changed.append(name)
+    check("W4 sem ajustes de teste, o grafo de cada pedaco e exatamente o que foi medido na GPU",
+          not changed and len(golden["grafos"]) == 12, ", ".join(changed))
+
+    # ---- A janela na pessoa (`window`): o retangulo do quadro que o Animate gera.
+    # Pessoa em pe num video deitado de 832 x 480: o recorte dela vai de 300 a 500 na largura.
+    box = node.window_box(300, 40, 500, 470, 832, 480)
+    check("J1 pessoa em pe num video deitado: a janela a contem com folga, em multiplos de 16, e e bem menor que o quadro",
+          box is not None and all(value % 16 == 0 for value in box) and box[0] <= 300 - 64 and box[0] + box[2] >= 500 + 64
+          and box[1] == 0 and box[3] == 480 and box[2] * box[3] < 0.5 * 832 * 480, str(box))
+    tight = node.window_box(300, 40, 500, 470, 832, 480, margin=16)
+    check("J1b com menos folga pedida (ajuste de teste), a janela encolhe, sem perder o cenario proporcional ao recorte",
+          tight is not None and tight[2] < box[2] and tight[0] <= 300 - 40 and tight[0] + tight[2] >= 500 + 40, str(tight))
+    check("J2 pessoa que enche o quadro, ou recorte vazio: sem janela (o pedaco e gerado inteiro)",
+          node.window_box(40, 150, 440, 832, 480, 832) is None and node.window_box(10, 10, 10, 10, 832, 480) is None)
+    small = node.window_box(400, 200, 440, 280, 832, 480)
+    tall = node.window_box(200, 0, 260, 832, 480, 832)
+    check("J3 a janela nao fica menor que 256 px de lado nem mais comprida que 2,5 para 1",
+          small is not None and small[2] >= 256 and small[3] >= 256 and small[0] <= 400 and small[0] + small[2] >= 440
+          and tall is not None and tall[3] / tall[2] <= 2.5 and tall[2] >= 60 + 128, f"{small} {tall}")
+    corner = node.window_box(0, 0, 150, 300, 832, 480)
+    check("J4 pessoa no canto: a janela fica dentro do quadro e a contem",
+          corner is not None and corner[0] == 0 and corner[1] == 0 and corner[2] >= 150 + 64 and corner[3] >= 300 + 64
+          and corner[0] + corner[2] <= 832 and corner[1] + corner[3] <= 480, str(corner))
+    moving = np.zeros((3, 60, 80), dtype=np.float32)
+    moving[0, 10:30, 5:20] = moving[1, 12:40, 30:50] = moving[2, 20:45, 55:70] = 1
+    check("J5 o retangulo do recorte e o de todos os quadros do pedaco somados",
+          node.mask_bounds(moving) == (5, 10, 70, 45) and node.mask_bounds(moving * 0) is None)
+
+    # A colagem: quanto os quadros gerados valem em volta do recorte.
+    block = np.zeros((120, 160), dtype=np.float32)
+    block[40:80, 60:100] = 1
+    weight = node.soften(block)
+    row = weight[60]
+    check("J6 na colagem os gerados valem tudo no recorte e ate 8 px em volta, e somem aos poucos nos 16 seguintes",
+          weight[40:80, 60:100].min() == 1 and row[100 + 7] == 1 and 0.3 < row[100 + 15] < 0.7 and row[100 + 25] == 0
+          and row[60 - 26] == 0 and all(row[100 + index] >= row[101 + index] for index in range(30)), f"{row[115]:.2f}")
+    edge = np.zeros((40, 40), dtype=np.float32)
+    edge[20:, 10:30] = 1  # pessoa cortada pela borda de baixo
+    check("J6b recorte encostado na borda do quadro: vale tudo ate a borda", node.soften(edge)[39, 10:30].min() == 1)
+
+    rng = np.random.default_rng(7)
+    frames = rng.uniform(0.2, 0.8, (12, 160, 240, 3)).astype(np.float32)
+    x, y = 48, 16
+    masks = np.zeros((12, 128, 128), dtype=np.float32)
+    masks[:, 40:88, 40:88] = 1
+    made = rng.uniform(0.3, 0.7, (12, 128, 128, 3)).astype(np.float32)
+    out, fix = node.pasted(frames, made, masks, x, y)
+    outside = out.copy()
+    outside[:, y:y + 128, x:x + 128] = frames[:, y:y + 128, x:x + 128]
+    check("J7 colagem: fora da janela e longe do recorte o video fica como e; no recorte entram os gerados",
+          fix is None and np.array_equal(outside, frames) and np.allclose(out[:, y + 40:y + 88, x + 40:x + 88], made[:, 40:88, 40:88])
+          and np.array_equal(out[:, y:y + 14, x:x + 128], frames[:, y:y + 14, x:x + 128])
+          and not np.allclose(out[:, y + 30:y + 40, x + 40:x + 88], frames[:, y + 30:y + 40, x + 40:x + 88]))
+    # A cor: o pedaco saiu mais contrastado e mais claro que o anterior, de que repete 5 quadros.
+    drifted = np.clip((made - 0.5) * 1.15 + 0.53, 0, 1).astype(np.float32)
+    fixed, fix = node.pasted(frames, drifted, masks, x, y, previous=made[:5], overlap=5)
+    inside = (slice(None), slice(y + 44, y + 84), slice(x + 44, x + 84))
+    before, after = np.abs(drifted[:, 44:84, 44:84] - made[:, 44:84, 44:84]).mean(), np.abs(fixed[inside] - made[:, 44:84, 44:84]).mean()
+    check("J8 a cor dos gerados e trazida a do pedaco de que continuam, dentro do recorte",
+          fix is not None and 0.84 < fix[0][0] < 0.9 and after < before / 5, f"{before:.4f} -> {after:.4f}; ganho {fix and fix[0][0]:.3f}")
+    scene = frames.copy()
+    scene[5:] = np.clip(scene[5:] * 0.5, 0, 1)  # corte de cena no video de origem, bem na emenda
+    _, cut_fix = node.pasted(scene, drifted, masks, x, y, previous=made[:5], overlap=5)
+    # Um video parado e um pedaco igual ao anterior (quadros repetidos: nenhuma diferenca a medir).
+    calm, still = np.repeat(frames[:1], 12, axis=0), np.repeat(made[:1], 12, axis=0)
+    _, same_fix = node.pasted(calm, still, masks, x, y, previous=still[:5], overlap=5)
+    check("J8b corte de cena na emenda, ou pedaco que ja saiu na cor do anterior: nada a corrigir",
+          cut_fix is None and same_fix is None)
+
+    class Meta:  # no lugar do AAPoseMeta do pacote de pose: so o que a janela usa
+        def __init__(self):
+            self.points = np.array([[100.0, 200.0]])
+            self.width, self.height = 832, 480
+
+        def crop(self, x0, y0, x1, y1):
+            self.points = self.points - (x0, y0)
+            self.width, self.height = x1 - x0, y1 - y0
+            return self
+
+    original = {"pose_metas": [Meta()], "pose_metas_original": ["como veio"]}
+    moved = node.shifted(original, 64, 32, 304, 448)
+    check("J9 a pose passa a ser contada do canto da janela, sem mexer na que veio da deteccao",
+          moved["pose_metas"][0].points.tolist() == [[36.0, 168.0]] and moved["pose_metas"][0].width == 304
+          and original["pose_metas"][0].points.tolist() == [[100.0, 200.0]] and moved["pose_metas_original"] == ["como veio"])
+
+    # O grafo: com a janela, a pose e o recorte saem do quadro inteiro, e o Animate, a imagem da
+    # pessoa e os quadros de que o pedaco continua passam a ter o tamanho que o no da janela diz.
+    def windowed(expert, motion=None, **more):
+        spec = workflows.resolve({"mode": "swap", "quality": "boa", "seed": 1, "expert": expert, **more}, True, False, True)
+        spec.update(width=832, height=480, length=49, chunk=49)
+        nodes = workflows.build(spec, files, "p", "n", "x", start_image="person.png", video="v.mp4", motion=motion)[0]
+        return nodes, {item["class_type"]: (key, item["inputs"]) for key, item in nodes.items()}
+
+    nodes, kinds = windowed({"window": True}, motion="m.mp4")
+    cut = kinds["WanStudioWindow"][0]
+    animate, paste = kinds["WanAnimateToVideo"][1], kinds["WanStudioPaste"][1]
+    check("J10 grafo com a janela: o Animate gera no tamanho dela, com o que foi cortado nela",
+          animate["width"] == [cut, 6] and animate["height"] == [cut, 7] and animate["character_mask"] == [cut, 1]
+          and animate["continue_motion"] == [cut, 3] and kinds["DrawViTPose"][1]["pose_data"] == [cut, 2]
+          and kinds["ResizeAndPadImage"][1]["target_width"] == [cut, 6] and kinds["ImageCompositeMasked"][1]["destination"] == [cut, 0]
+          and nodes[kinds["WanStudioWindow"][1]["mask"][0]]["class_type"] == "ImageToMask"
+          and kinds["PoseAndFaceDetection"][1]["width"] == 832, str(animate["width"]))
+    check("J11 e os quadros gerados voltam para o video antes de serem gravados, com a cor trazida a do pedaco anterior",
+          paste["patch"][0] == kinds["VAEDecode"][0] and paste["x"] == [cut, 4] and paste["y"] == [cut, 5]
+          and paste["previous"] == [cut, 3] and paste["overlap"] == 5 and paste["mask"] == [cut, 1]
+          and nodes[paste["images"][0]]["class_type"] == "GetVideoComponents"
+          and kinds["SaveImage"][1]["images"] == [kinds["WanStudioPaste"][0], 0])
+    # ---- A pessoa inteira (`whole`): o recorte do SAM2 mais o que o modelo de primeiro plano acha
+    # ligado a ele. O caso do exemplo oficial: a tranca sai da cabeca e pende solta, longe do corpo.
+    person = np.zeros((100, 100), dtype=bool)
+    person[10:90, 40:60] = True    # o que o SAM2 pegou; a cabeca em cima, perto de (50, 18)
+    head = (50.0, 18.0, 16.0)
+    found = person.copy()
+    found[10:14, 30:40] = True     # a tranca, presa a cabeca...
+    found[14:95, 30:33] = True     # ...pendendo longe do corpo
+    found[6:10, 42:58] = True      # o chapeu, em cima da cabeca
+    found[60:64, 60:75] = True     # um bastao na mao, a meia altura
+    found[20:90, 80:95] = True     # outra pessoa, separada
+    whole = node.completed(person, found, head)
+    check("P1 a tranca solta e o chapeu, presos a cabeca, entram no recorte; o bastao na mao e a outra pessoa nao",
+          whole[14:95, 30:33].all() and whole[6:10, 42:58].all() and whole[10:90, 40:60].all()
+          and not whole[60:64, 61:75].any() and not whole[20:90, 80:95].any())
+    glued = person.copy()
+    glued[5:100, 60:100] = True    # alguem encostado nela, ate na altura da cabeca, maior que ela
+    check("P2 um vizinho encostado (grande perto da pessoa) fica como esta, mesmo encostando perto da cabeca",
+          (node.completed(person, glued, head) == person).all())
+    top = node.completed(person, found)
+    check("P3 sem a cabeca pela pose vale o terco de cima do recorte; sem pessoa nada entra; sem nada a mais, nada muda",
+          top[14:95, 30:33].all() and not top[60:64, 61:75].any()
+          and not node.completed(np.zeros((20, 20), dtype=bool), np.ones((20, 20), dtype=bool)).any()
+          and (node.completed(person, person, head) == person).all())
+    meta = {"keypoints_body": body(**{"0": (0.5, 0.18), "14": (0.47, 0.16), "15": (0.53, 0.16), "1": (0.5, 0.3)})}
+    spot = node.head_spot(meta, 100, 100)
+    check("P3b a cabeca pela pose: no meio dos pontos do rosto, com raio que chega ao pescoco",
+          spot is not None and abs(spot[0] - 50) < 1 and abs(spot[1] - 17.3) < 1 and spot[2] >= 12
+          and node.head_spot({"keypoints_body": body()}, 100, 100) is None, str(spot))
+    import builtins
+    real_import = builtins.__import__
+
+    def without_scipy(name, *args, **kwargs):
+        if name.startswith("scipy"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = without_scipy
+    try:
+        plain = node.completed(person, found, head)
+    finally:
+        builtins.__import__ = real_import
+    check("P4 sem o scipy o resultado e o mesmo", (plain == whole).all())
+
+    def masked(expert, **more):
+        spec = workflows.resolve({"mode": "swap", "quality": "boa", "seed": 1, "expert": expert, **more}, True, False, True)
+        spec.update(width=832, height=480, length=49, chunk=49)
+        nodes = workflows.build(spec, {**files, "foreground": "BiRefNet-portrait"}, "p", "n", "x", start_image="person.png",
+                                video="v.mp4")[0]
+        return nodes, {item["class_type"]: (key, item["inputs"]) for key, item in nodes.items()}
+
+    whole_nodes, whole_kinds = masked({"whole": True})
+    grown = whole_nodes[whole_kinds["GrowMask"][1]["mask"][0]]
+    check("P5 grafo com a pessoa inteira: o recorte do SAM2 passa pelo no que o completa antes de ser engordado",
+          grown["class_type"] == "WanStudioWholePerson" and grown["inputs"]["mask"] == [whole_kinds["WanStudioPersonMask"][0], 0]
+          and grown["inputs"]["pose_data"] == [whole_kinds["PoseAndFaceDetection"][0], 0]
+          and whole_kinds["WanStudioForegroundLoader"][1]["model"] == "BiRefNet-portrait"
+          and whole_nodes[grown["inputs"]["model"][0]]["class_type"] == "WanStudioForegroundLoader")
+    plain_kinds = masked({})[1]
+    window_kinds = masked({"whole": True, "window": True})[1]
+    check("P6 sem pedir, nada muda; com a janela, a janela recebe o recorte ja completo",
+          "WanStudioWholePerson" not in plain_kinds and "WanStudioForegroundLoader" not in plain_kinds
+          and "WanStudioWholePerson" in window_kinds and "WanStudioWindow" in window_kinds)
+
+    # ---- O rosto em detalhe (`face`): a janela da cabeca e a segunda passada.
+    def face_meta(x, y):  # o rosto em (x, y) num quadro de 480 x 832, o pescoco 40 px abaixo
+        return {"keypoints_body": body(**{"0": (x / 480, y / 832), "14": ((x - 8) / 480, (y - 6) / 832),
+                                          "15": ((x + 8) / 480, (y - 6) / 832), "1": (x / 480, (y + 40) / 832)})}
+
+    metas = [face_meta(200, 150), face_meta(230, 160), face_meta(260, 150)]
+    box, heads = node.head_window(metas, 480, 832)
+    radius = heads[0][2]
+    check("H1 a janela da cabeca: um quadrado dentro do quadro, com a cabeca de todos os quadros e folga em volta",
+          box is not None and all(head for head in heads) and box[0] <= 200 - radius and box[0] + box[2] >= 260 + radius
+          and box[1] <= 150 - radius and box[1] + box[2] >= 160 + radius and box[0] + box[2] <= 480 and box[1] + box[2] <= 832,
+          f"{box} raio {radius:.0f}")
+    check("H2 a cabeca e ampliada ate 3 vezes, para um lado entre 256 e 512 (multiplo de 16); sem rosto, sem janela",
+          node.zoom_size(100) == 304 and node.zoom_size(40) == 256 and node.zoom_size(300) == 512
+          and node.head_window([{"keypoints_body": body()}], 480, 832)[0] is None)
+    check("H3 no canto do quadro a janela desliza para dentro dele",
+          node.square_box(10, 10, 100, 480, 832) == (0, 0, 100) and node.square_box(475, 830, 100, 480, 832) == (380, 732, 100))
+    people = np.ones((3, 832, 480), dtype=np.float32)
+    only = node.head_masks(people, [heads[0], None, heads[2]])
+    check("H4 o que a segunda passada refaz: o recorte da pessoa so em volta da cabeca (onde a pose nao achou o rosto, "
+          "vale a do quadro vizinho)", only[0, 150, 200] and not only[0, 600, 200] and only[1].sum() > 0
+          and (only[1] == only[0]).all() and not node.head_masks(people, [None, None, None]).any())
+
+    class Frames:  # no lugar do tensor da imagem da pessoa
+        shape = (1, 832, 480, 3)
+
+        def __getitem__(self, item):
+            return item
+
+    cropped = node.WanStudioFitReference().fit(Frames(), {"pose_metas_original": [face_meta(240, 200)]}, 512, 512,
+                                               region="cabeca")[0]
+    rows, columns = cropped[1], cropped[2]
+    check("H5 a referencia da segunda passada e a cabeca da imagem da pessoa, no mesmo enquadramento da janela",
+          rows.stop - rows.start == columns.stop - columns.start and rows.start <= 200 - 20 <= 200 + 20 <= rows.stop
+          and columns.start <= 240 <= columns.stop, str(cropped[1:3]))
+    ring = np.zeros((40, 40), dtype=np.float32)
+    ring[5:35, 5:35] = 1           # um recorte que chega a 5 px da borda da janela
+    tapered = node.edged(node.soften(ring, 0, 2), 2)
+    check("H5b na colagem da cabeca, a passagem e curta e acaba antes da borda da janela",
+          tapered[0].max() == 0 and tapered[:, 0].max() == 0 and tapered[20, 20] == 1 and 0 < tapered[20, 1] < 1)
+    paster = node.WanStudioFacePaste()
+    check("H6 com o rosto ja grande, o no de colar nem pede a cabeca refeita",
+          paster.check_lazy_status("quadros", False, 0, 0) == [] and paster.check_lazy_status("quadros", True, 0, 0) == ["patch", "mask"]
+          and paster.paste("quadros", False, 0, 0) == ("quadros",))
+
+    face_nodes, face_kinds = windowed({"face": True}, motion="m.mp4")
+    animates = [key for key, item in face_nodes.items() if item["class_type"] == "WanAnimateToVideo"]
+    decodes = [key for key, item in face_nodes.items() if item["class_type"] == "VAEDecode"]
+    head_node = face_kinds["WanStudioHeadWindow"]
+    second = face_nodes[animates[-1]]["inputs"]
+    final = face_kinds["WanStudioFacePaste"][1]
+    check("H7 grafo com o rosto em detalhe: um segundo Animate na cabeca ampliada, com a cabeca da imagem como referencia, "
+          "continuando dos quadros recebidos, e o resultado colado antes de gravar",
+          len(animates) == 2 and second["width"] == [head_node[0], 7] and second["character_mask"] == [head_node[0], 1]
+          and second["continue_motion"] == [head_node[0], 3] and face_kinds["WanStudioFitReference"][1]["region"] == "cabeca"
+          and final["active"] == [head_node[0], 8] and face_kinds["SaveImage"][1]["images"] == [face_kinds["WanStudioFacePaste"][0], 0]
+          and head_node[1]["images"] == [decodes[0], 0], str(len(animates)))
+    both = windowed({"face": True, "window": True})[1]
+    check("H8 com a janela tambem: a cabeca e refeita sobre os quadros ja colados no video",
+          both["WanStudioHeadWindow"][1]["images"] == [both["WanStudioPaste"][0], 0]
+          and "WanStudioFacePaste" not in windowed({})[1])
+
+    first = windowed({"window": True, "window_margin": 96})[1]
+    loose = windowed({"window": True}, replace=False)[1]
+    check("J12 primeiro pedaco: sem cor a igualar; sem manter o cenario nao ha recorte, e a janela nao entra",
+          "previous" not in first["WanStudioPaste"][1] and "continue_motion" not in first["WanAnimateToVideo"][1]
+          and first["WanStudioWindow"][1]["margin"] == 96 and "margin" not in kinds["WanStudioWindow"][1]
+          and "WanStudioWindow" not in loose and "WanStudioPaste" not in loose and loose["WanAnimateToVideo"][1]["width"] == 832)
+
     print(f"\n{len(FAILED)} falha(s)")
     return 1 if FAILED else 0
 

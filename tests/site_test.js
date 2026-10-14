@@ -48,7 +48,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await second.route("https://ntfy.sh/**", (route) => route.abort());  // segura a descoberta para ver o "ligando"
   const pairOnly = { t: session.t, k: session.k, s: Math.floor(Date.now() / 1000) };
   await paired.goto(`${SITE}#c=${Buffer.from(JSON.stringify(pairOnly)).toString("base64url")}`);
-  await paired.waitForSelector("#cameras .camera");
+  await paired.waitForSelector("#cameras .camera", { state: "attached" });
   await paired.waitForFunction(() => /ligando/.test(document.querySelector("#status").textContent), null, { timeout: 10000 }).catch(() => {});
   const waiting = await paired.evaluate(() => ({
     status: document.querySelector("#status").textContent, botao: document.querySelector("#submit").textContent,
@@ -61,12 +61,70 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await paired.evaluate(() => { lastDiscover = 0; refreshStatus(); });
   const found = await paired.waitForFunction(() => document.querySelector("#status").dataset.state === "ok", null, { timeout: 60000 }).then(() => true, () => false);
   check("P2 conecta sozinho quando a GPU aparece, sem colar codigo", found, await paired.textContent("#status"));
-  check("P3 sai do estado ligando", await paired.evaluate(() => localStorage.getItem("wan-starting") === null && !document.querySelector("#submit").disabled));
+  // O botao volta a ser o do modo (a troca de pessoa; travado so porque o modelo dela ainda nao chegou).
+  check("P3 sai do estado ligando", await paired.evaluate(() => localStorage.getItem("wan-starting") === null
+    && document.querySelector("#submit").textContent === "Trocar pessoa" && !document.querySelector("#mode-note").hidden));
   await second.close();
+
+  // ---- W. a GPU rapida (Modal): o atalho deixa no pareamento o endereco e a chave com que o
+  // proprio site a liga, de qualquer aparelho
+  fs.rmSync(`${TESTS}/profile4`, { recursive: true, force: true });
+  const third = await chromium.launchPersistentContext(`${TESTS}/profile4`, {
+    channel: "chrome", headless: true, viewport: { width: 1280, height: 800 },
+  });
+  const fast = third.pages()[0] || await third.newPage();
+  await third.route("https://ntfy.sh/**", (route) => route.abort());
+  const wakeUrl = "https://conta-de-teste--wan-studio-acordar.modal.run/";
+  const wakes = [];
+  let wakeReply = { status: 403, body: { detail: "chave inválida" } };
+  await third.route(wakeUrl, (route) => {
+    const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type",
+                   "Access-Control-Allow-Methods": "POST, OPTIONS" };
+    if (route.request().method() !== "POST") return route.fulfill({ status: 204, headers: cors });  // a consulta previa do navegador
+    wakes.push(JSON.parse(route.request().postData()));
+    return route.fulfill({ status: wakeReply.status, contentType: "application/json", headers: cors,
+                           body: JSON.stringify(wakeReply.body) });
+  });
+  const kaggleOnly = { t: "wan-teste-so-pareado", k: session.k };
+  await fast.goto(`${SITE}#c=${Buffer.from(JSON.stringify(kaggleOnly)).toString("base64url")}`);
+  await fast.waitForSelector("#cameras .camera", { state: "attached" });
+  await fast.click("#status");
+  await fast.waitForSelector("#gpu[open]");
+  check("W1 pareado so pelo Kaggle: o dialogo nao oferece ligar a GPU rapida", !(await fast.isVisible("#wake-box")));
+  const withWake = { ...kaggleOnly, w: wakeUrl, wk: "chave-de-acordar-do-teste" };
+  await fast.goto(`${SITE}#c=${Buffer.from(JSON.stringify(withWake)).toString("base64url")}`);
+  await fast.reload();
+  await fast.waitForSelector("#cameras .camera", { state: "attached" });
+  await fast.click("#status");
+  await fast.waitForSelector("#gpu[open]");
+  check("W2 pareado pela GPU rapida: o dialogo ganha o botao de ligar daqui",
+    await fast.isVisible("#wake") && (await fast.textContent("#wake")).includes("Ligar a GPU rápida"));
+  await fast.click("#wake");
+  await fast.waitForSelector("#wake-error:not([hidden])");
+  check("W3 chave recusada: avisa para rodar o atalho de novo, sem dizer que esta ligando",
+    wakes.length === 1 && wakes[0].key === "chave-de-acordar-do-teste" && (await fast.textContent("#wake-error")).includes("atalho")
+    && !/ligando/i.test(await fast.textContent("#status")), await fast.textContent("#wake-error"));
+  wakeReply = { status: 200, body: { state: "requested", gpu: "H100", id: "abc" } };
+  await fast.click("#wake");
+  await fast.waitForFunction(() => /ligando/i.test(document.querySelector("#status").textContent), null, { timeout: 10000 }).catch(() => {});
+  const waking = await fast.evaluate(() => ({
+    status: document.querySelector("#status").textContent, botao: document.querySelector("#wake").textContent,
+    travado: document.querySelector("#wake").disabled, erro: document.querySelector("#wake-error").hidden,
+    gerar: document.querySelector("#submit").textContent,
+  }));
+  check("W4 chave aceita: a pagina passa a mostrar a GPU ligando, e o botao nao pede outra",
+    wakes.length === 2 && /GPU ligando/.test(waking.status) && /Ligando/.test(waking.botao) && waking.travado && waking.erro
+    && /ligando/.test(waking.gerar), JSON.stringify(waking));
+  await fast.goto(`${SITE}#c=${Buffer.from(JSON.stringify(kaggleOnly)).toString("base64url")}`);
+  await fast.reload();
+  await fast.waitForSelector("#cameras .camera", { state: "attached" });
+  check("W5 ligar o Kaggle depois nao tira deste navegador o jeito de ligar a rapida",
+    await fast.evaluate(() => JSON.parse(localStorage.getItem("wan-pairing")).wake) === wakeUrl);
+  await third.close();
 
   // ---- A. primeira visita, GPU desligada
   await page.goto(SITE);
-  await page.waitForSelector("#cameras .camera");
+  await page.waitForSelector("#cameras .camera", { state: "attached" });
   check("A1 status inicial desligado", (await text("#status")).includes("GPU desligada"), await text("#status"));
   check("A2 botao principal pede para ligar", (await text("#submit")).includes("Ligar a GPU"));
   check("A3 37 movimentos de camera", (await count("#cameras .camera")) === 37);
@@ -74,7 +132,23 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // O aviso so aparece depois que a galeria do navegador (IndexedDB) e lida.
   const emptyShown = await page.waitForSelector("#empty", { state: "visible", timeout: 5000 }).then(() => true, () => false);
   check("A5 galeria vazia explica", emptyShown);
-  await page.hover('#cameras [data-value="orbit"]');
+  // Quem nunca conectou ve o que a sessao de costume oferece: so a troca de pessoa, ja aberta.
+  const first = await page.evaluate(() => {
+    const hidden = (selector) => document.querySelector(selector).hidden;
+    const top = (selector) => document.querySelector(selector).getBoundingClientRect().top;
+    return {
+      modo: state.mode, semAbas: hidden('[data-key="mode"]'), titulo: hidden("#focus-title") ? "" : document.querySelector("#focus-title").textContent,
+      passos: hidden("#howto") ? 0 : document.querySelectorAll("#howto li").length, semCartoes: hidden("#starter"),
+      pessoa: !hidden('[data-frame="start_image"]'), video: !hidden('[data-frame="video"]'),
+      semFiltro: hidden('[data-key="filter"]'), vazio: document.querySelector("#empty").textContent,
+      semPresets: hidden("#presets-field"), semModelo: hidden("#model-field"),
+      // os arquivos, depois o trecho, depois a qualidade (que mostra o tempo que ele leva)
+      ordem: top("#frames") < top("#timing-row") && top("#timing-row") < top("#swap-options") && top("#swap-options") < top("#prompt-field"),
+    };
+  });
+  check("A5b primeira visita: a pagina ja abre na troca de pessoa, sem as abas dos outros modos, e explica os tres passos",
+    first.modo === "swap" && first.semAbas && first.titulo === "Trocar pessoa em vídeo" && first.passos === 3 && first.semCartoes && first.pessoa
+    && first.video && first.semFiltro && first.semPresets && first.semModelo && first.ordem && first.vazio.includes("foto da pessoa"), JSON.stringify(first));
   await shot("01-desligado");
 
   // ---- B. conectar colando o codigo
@@ -92,6 +166,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   check("B4 dialogo fechou", !(await page.evaluate(() => document.querySelector("#gpu").open)));
   check("B5 pareamento guardado", await page.evaluate(() => Boolean(localStorage.getItem("wan-pairing"))));
   check("B6 melhorador escondido sem 2a GPU", !(await page.isVisible("#enhance")));
+  // A pilha deste teste e a do estudio inteiro (sem SO_TROCA): os outros modos aparecem.
+  const whole = await page.evaluate(() => ({
+    abas: [...document.querySelectorAll('[data-key="mode"] button')].filter((tab) => tab.offsetParent).map((tab) => tab.dataset.value).join(),
+    semTitulo: document.querySelector("#focus-title").hidden, semPassos: document.querySelector("#howto").hidden,
+    cartoes: [...document.querySelectorAll("#starter .starter-card")].filter((card) => card.offsetParent).map((card) => card.dataset.start).join(),
+    guardado: localStorage.getItem("wan-focus"), modo: state.mode, modelo: !document.querySelector("#model-field").hidden,
+  }));
+  check("B7 sessao com o estudio inteiro: as abas e os cartoes dos outros modos aparecem, a troca na frente, e a pagina guarda isso",
+    whole.abas === "swap,t2v,i2v,flf,img" && whole.semTitulo && whole.semPassos && whole.cartoes === "swap,i2v,t2v,img" && whole.guardado === '"all"'
+    && whole.modo === "swap" && whole.modelo, JSON.stringify(whole));
+  await page.click('#starter [data-start="t2v"]');
+  check("B8 cada cartao leva ao seu modo", await page.evaluate(() => state.mode === "t2v" && !document.querySelector("#presets-field").hidden));
 
   // ---- C. texto -> video, 2 de uma vez, com presets
   await page.fill("#prompt", "um gato astronauta flutuando");
@@ -204,6 +290,42 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   check("I4 filtro de imagens", (await count(".card")) === 1);
   await page.click('[data-key="filter"] [data-value="all"]');
 
+  // ---- R. sessao so de troca de pessoa (a de costume): o servidor diz isso em /api/status
+  // (conferido em engine_test.py) e a pagina esconde o que e dos outros modos
+  await page.evaluate(() => {
+    window.realApi = api;
+    window.api = async (path, options) => {
+      const response = await window.realApi(path, options);
+      if (path !== "/api/status" || !response.ok) return response;
+      return new Response(JSON.stringify({ ...(await response.json()), focus: "swap" }), { status: 200 });
+    };
+    return refreshStatus();
+  });
+  const focused = await page.evaluate(`({
+    modo: state.mode, semAbas: document.querySelector('[data-key="mode"]').hidden, titulo: !document.querySelector("#focus-title").hidden,
+    botoes: [...new Set([...document.querySelectorAll(".card-actions > *")].map((node) => node.textContent))].sort().join(),
+    filtro: !document.querySelector('[data-key="filter"]').hidden, guardado: localStorage.getItem("wan-focus"),
+    video: !document.querySelector('[data-frame="video"]').hidden, semPresets: document.querySelector("#presets-field").hidden,
+    semModelo: document.querySelector("#model-field").hidden,
+  })`);
+  check("R1 sessao so de troca: o formulario vai para a troca, as abas somem e os cards perdem o que leva a outro modo",
+    focused.modo === "swap" && focused.semAbas && focused.titulo && focused.botoes === "Baixar,Excluir" && focused.filtro
+    && focused.guardado === '"swap"' && focused.video && focused.semPresets && focused.semModelo, JSON.stringify(focused));
+  await page.click("#status");
+  await page.waitForSelector("#gpu[open] #gpu-facts dd");
+  const swapFacts = await text("#gpu-facts");
+  check("R2 e o dialogo da GPU so fala do que a troca usa", swapFacts.includes("Troca de pessoa") && swapFacts.includes("Alta definição")
+    && swapFacts.includes("Movimento fluido") && !swapFacts.includes("14B") && !swapFacts.includes("Melhorar prompt"), swapFacts.slice(0, 160));
+  await shot("05b-so-troca");
+  await page.click("#gpu [data-close]");
+  await page.evaluate(() => { window.api = window.realApi; return refreshStatus(); });
+  const back = await page.evaluate(() => ({
+    abas: !document.querySelector('[data-key="mode"]').hidden, modo: state.mode,
+    botoes: [...new Set([...document.querySelectorAll(".card-actions > *")].map((node) => node.textContent))].sort().join(),
+  }));
+  check("R3 de volta a uma sessao inteira: as abas e as acoes dos cards voltam", back.abas && back.modo === "swap"
+    && back.botoes === "Animar,Baixar,Continuar,Excluir,Reusar", JSON.stringify(back));
+
   // ---- T. trocar pessoa (Wan 2.2 Animate): imagem + video, com o video preparado pelo ffmpeg
   await page.click('[data-key="mode"] [data-value="swap"]');
   check("T1 sem o Animate: aviso e botao travado", await page.isVisible("#mode-note") && await page.isDisabled("#submit"), await text("#mode-note"));
@@ -219,6 +341,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       semUltraNaT4: document.querySelector('[data-key="quality"] [data-value="ultra"]').hidden,
       semTurboNemResolucao: hidden("#fast-row") && hidden("#resolution-field"), ampliar: !hidden("#hd-row"),
       estimativa: /cerca de \d+ min/.test(document.querySelector("#swap-estimate").textContent),
+      tempoPorQualidade: [...document.querySelectorAll('[data-key="quality"] button:not([hidden]) small')].every((note) => /· ~\d/.test(note.textContent)),
       inicio: !hidden("#start-field"), video: !hidden('[data-frame="video"]'), semFrameFinal: hidden('[data-frame="end_image"]'),
       titulo: document.querySelector('[data-frame="start_image"] .drop-title').textContent,
       botao: document.querySelector("#submit").textContent.trim(),
@@ -275,6 +398,26 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const swapResult = await pixelOf(".card video");
   check("T5b o resultado sao os quadros gerados (45, a 16 fps), nao o video enviado",
     swapResult.green > swapResult.red + 40 && swapResult.green > swapResult.blue + 40 && Math.abs(swapResult.duracao - 45 / 16) < 0.1, JSON.stringify(swapResult));
+  // A troca guarda o video de origem: o visualizador mostra os dois lado a lado, andando juntos.
+  await page.locator(".card").first().locator(".card-media.open").click();
+  await page.waitForSelector("#viewer[open] video");
+  await page.click('#viewer-actions button:has-text("Comparar com o original")');
+  await page.waitForSelector(".compare video");
+  await page.waitForFunction(() => document.querySelector(".compare-pane:last-child video").currentTime > 0.4, null, { timeout: 15000 }).catch(() => {});
+  const compared = await page.evaluate(() => {
+    const [before, after] = document.querySelectorAll(".compare video");
+    return { videos: document.querySelectorAll(".compare video").length, antes: Number(before.currentTime.toFixed(2)),
+             depois: Number(after.currentTime.toFixed(2)), mudo: before.muted,
+             legendas: [...document.querySelectorAll(".compare figcaption")].map((caption) => caption.textContent).join("|"),
+             volta: document.querySelector("#viewer-actions .accent").textContent };
+  });
+  check("T5c comparar com o original: os dois videos lado a lado, no mesmo instante, e da para voltar",
+    compared.videos === 2 && compared.depois > 0.3 && Math.abs(compared.antes - compared.depois) < 0.3 && compared.mudo
+    && compared.legendas === "Original|Resultado" && compared.volta === "Ver só o resultado", JSON.stringify(compared));
+  await shot("06c2-comparar");
+  await page.click('#viewer-actions button:has-text("Ver só o resultado")');
+  check("T5d de volta ao resultado sozinho", (await count("#viewer-media video")) === 1 && (await count(".compare")) === 0);
+  await page.click("#viewer [data-close]");
   const graphsOf = async (port) => Object.values(await (await fetch(`http://127.0.0.1:${port}/_graphs`)).json()).map((graph) => Object.values(graph));
   const lastGraph = async () => (await graphsOf(8188)).pop();
   let swapNodes = await lastGraph();

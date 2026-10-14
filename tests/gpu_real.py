@@ -11,6 +11,7 @@ da sessao ligada (`python free/ligar.py`) e do ffmpeg no PATH. Gasta a cota de G
   python tests/gpu_real.py limpar                 remove do servidor os jobs terminados da bateria
   python tests/gpu_real.py melhorar               chama o melhorador de prompt
   python tests/gpu_real.py log [nome] [linhas]    registro da maquina: comfyui, studio ou extras
+  python tests/gpu_real.py quadros teste A B      os quadros de A a B do resultado, lado a lado
   python tests/gpu_real.py desligar               desliga a sessao e espera o Kaggle confirmar
 
 `desligar` nao age com job em andamento, e antes guarda em resultados/ os videos prontos que
@@ -18,6 +19,11 @@ ninguem buscou. E o passo que falta para subir codigo novo: com a sessao ligada,
 nao reenvia o notebook.
 
 O endereco e a senha da sessao saem do registro do Kaggle (o quadro que o notebook imprime).
+Com WAN_BACKEND=nuvem os testes vao para a sessao do Modal (ligue-a com `python nuvem/ligar.py`):
+o endereco vem do atalho de la, e o que e especifico do Kaggle (fila, cota) nao se aplica.
+Com WAN_BACKEND=cpu eles vao para a sessao sem GPU do Kaggle (`python free/build.py --cpu` e
+`python free/ligar.py --cpu`), que nao gasta cota: os testes "x_" sao os feitos para ela, em
+128 px e um passo, e so dizem se o codigo roda no ComfyUI de verdade, nao se o video presta.
 Cada resultado fica em tests/.work/gpu com alguns quadros extraidos: abra-os, porque "terminou
 sem erro" nao quer dizer que o video esta certo. Os tempos vao para bateria.json.
 
@@ -26,7 +32,9 @@ jobs dos testes ficam na fila que o site nao enxerga (`hold`), para o site abert
 nao levar o resultado para a galeria dele antes deste script.
 """
 import base64
+import http.client
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -44,6 +52,10 @@ sys.path.insert(0, str(HERE.parent / "free"))
 import ligar  # noqa: E402
 
 SAMPLES = "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/input/"
+BACKEND = os.environ.get("WAN_BACKEND", "kaggle")  # "nuvem": a sessao do Modal; "cpu": a sem GPU do Kaggle
+if BACKEND == "cpu":
+    ligar.use_cpu_session()
+CLOUD = HERE.parent / "nuvem" / "ligar.py"
 BUSY = ("preparing", "queued", "running")
 CAT = "um gato astronauta flutuando dentro de uma nave espacial, luz suave"
 
@@ -94,6 +106,124 @@ TESTS = {
     # Video em pe com imagem quadrada: a pessoa entra com faixas pretas em cima e embaixo.
     "troca_vertical": ({"mode": "swap", "duration": 3, "quality": "boa", "seed": 14},
                        {"start_image": "pessoa.png", "video": "video_vertical.mp4"}),
+    # O mesmo com a imagem recortada na caixa da pessoa (ref=crop): ela ocupa a altura do quadro
+    # em vez de ficar pequena entre as faixas. Compare com a "troca_vertical" (o gorro do boneco).
+    "troca_vertical_crop": ({"mode": "swap", "duration": 3, "quality": "boa", "seed": 14,
+                             "expert": {"ref": "crop"}},
+                            {"start_image": "pessoa.png", "video": "video_vertical.mp4"}),
+    # A referencia da "r_larga_rapida", com os ajustes de hoje: so muda a caixa e o engorde.
+    "r_base_rapida": ({"mode": "swap", "duration": 10, "quality": "rapida", "seed": 12},
+                      {"start_image": "pessoa.png", "video": "video_audio.mp4"}),
+    # ---- Para a sessao sem GPU (WAN_BACKEND=cpu): o menor pedaco que exercita tudo. Um passo
+    # so, 128 px e 17 quadros: mesmo assim a CPU leva minutos em cada um. O que conferir: que
+    # termina sem erro e que os quadros tem a cena e uma pessoa no lugar da outra, por mais
+    # borrada que saia. A referencia; o recorte da imagem da pessoa; o modelo em INT8 (sem os
+    # nucleos de GPU ele e desfeito camada a camada: prova o arquivo e as LoRAs, nao a velocidade);
+    # e as duas cadeias num trecho de 4 s em pedacos de 21 quadros (o menor plano em que a
+    # segunda cadeia, com ancora, compensa: 3 pedacos numa e 2 na outra).
+    "x_base": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                "expert": {"size": [128, 128], "steps": 1, "chunk": 17, "onnx": "cpu"}},
+               {"start_image": "pessoa.png", "video": "video.mp4"}),
+    "x_crop": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                "expert": {"size": [128, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "ref": "crop"}},
+               {"start_image": "pessoa.png", "video": "video_vertical.mp4"}),
+    "x_int8": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                "expert": {"size": [128, 128], "steps": 1, "chunk": 17, "onnx": "cpu", "unet": "int8"}},
+               {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # A janela na pessoa, num quadro deitado (o exemplo e quadrado: a pessoa fica com parte da
+    # largura). O registro diz o tamanho da janela ("[wan_studio] janela: ...").
+    "x_janela": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                  "expert": {"size": [384, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "window": True}},
+                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    # A pessoa inteira, so o recorte (pintado de vermelho, sem gerar), nos 2 s do exemplo em que
+    # as trancas da pessoa original pendem soltas e voltavam no video trocado: sem e com o BiRefNet.
+    "x_recorte": ({"mode": "swap", "duration": 2, "start": 6.5, "quality": "rapida", "seed": 1,
+                   "expert": {"preview": True, "onnx": "cpu"}},
+                  {"start_image": "pessoa.png", "video": "video.mp4"}),
+    "x_inteira": ({"mode": "swap", "duration": 2, "start": 6.5, "quality": "rapida", "seed": 1,
+                   "expert": {"preview": True, "onnx": "cpu", "whole": True}},
+                  {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # A janela de verdade menor que o quadro: o corte, a pose deslocada e a colagem. (Em 384 x 224 a
+    # pessoa do exemplo ocupa quase toda a largura e a janela vira o quadro inteiro, mesmo com pouca
+    # folga: 14/10/2026. Num quadro mais largo sobra cenario dos lados.)
+    "x_janela2": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                   "expert": {"size": [576, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "window": True}},
+                  {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    # O rosto em detalhe num quadro deitado: a segunda passada na cabeca ampliada (256 px na CPU).
+    "x_rosto": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
+                 "expert": {"size": [384, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "face": True}},
+                {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    "x_cadeias": ({"mode": "swap", "duration": 4.0625, "quality": "rapida", "seed": 11,
+                   "expert": {"size": [128, 128], "steps": 1, "chunk": 21, "onnx": "cpu", "chains": 2}},
+                  {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # ---- O modelo em INT8 contra o GGUF Q4 de hoje (13/10/2026). O mesmo pedaco de 49 quadros
+    # da "m_4passos", um em cada GPU ao mesmo tempo (`juntos i_q4 i_int8`). So faz sentido num
+    # notebook gerado com `--env TORCH_INDEX=cu130 --env ANIMATE_INT8=1`: sem o
+    # PyTorch de CUDA 13 o ComfyUI desliga os nucleos de INT8 e o modelo fica mais lento que o
+    # GGUF. O que olhar: os segundos por passo no registro (`log comfyui` e `log comfyui1`), se
+    # o modelo coube ("loaded completely" ou quanto ficou de fora) e os quadros lado a lado.
+    "i_q4": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 11, "expert": {"worker": 0}},
+             {"start_image": "pessoa.png", "video": "video.mp4"}),
+    "i_int8": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 11,
+                "expert": {"worker": 1, "unet": "int8"}},
+               {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # O caso que mais pesa: o tamanho da "maxima" (576x1024, 49 quadros), em que o GGUF ja nao
+    # cabia inteiro na T4 (154 s por passo no video de 13/10).
+    "i_q4_max": ({"mode": "swap", "duration": 3.0625, "quality": "maxima", "seed": 21, "expert": {"worker": 0}},
+                 {"start_image": "retrato_vertical.png", "video": "vertical_audio.mp4"}),
+    "i_int8_max": ({"mode": "swap", "duration": 3.0625, "quality": "maxima", "seed": 21,
+                    "expert": {"worker": 1, "unet": "int8"}},
+                   {"start_image": "retrato_vertical.png", "video": "vertical_audio.mp4"}),
+    # ---- Tres passos em vez dos quatro para que a LoRA foi destilada: um quarto do tempo a menos,
+    # se a pessoa nao perder detalhe. O mesmo pedaco do "i_q4", na outra GPU (`juntos i_q4 p_3passos`).
+    "p_3passos": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 11, "expert": {"worker": 1, "steps": 3}},
+                  {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # ---- Duas cadeias que avancam, uma em cada GPU (13/10/2026; app/stitch.py `chains`). Os
+    # mesmos 10 s em pedacos de 49 quadros (4 pedacos numa cadeia so): a referencia; com a
+    # segunda cadeia partindo de quadros do primeiro pedaco (a ancora); e com ela partindo so
+    # da imagem. O que olhar: o tempo, e os quadros em volta da emenda entre as cadeias (nos 149
+    # quadros do exemplo a segunda entra no quadro 97 com ancora e no 68 sem, e a mistura leva
+    # 6), que e onde a pessoa pode mudar de um quadro para o outro:
+    #   python tests/gpu_real.py quadros c_duas 92 106     python tests/gpu_real.py quadros c_livre 63 77
+    "c_base": ({"mode": "swap", "duration": 10, "quality": "rapida", "seed": 12, "expert": {"chunk": 49, "chains": 1}},
+               {"start_image": "pessoa.png", "video": "video_audio.mp4"}),
+    "c_duas": ({"mode": "swap", "duration": 10, "quality": "rapida", "seed": 12, "expert": {"chunk": 49, "chains": 2}},
+               {"start_image": "pessoa.png", "video": "video_audio.mp4"}),
+    "c_livre": ({"mode": "swap", "duration": 10, "quality": "rapida", "seed": 12,
+                 "expert": {"chunk": 49, "chains": 2, "anchor": False}},
+                {"start_image": "pessoa.png", "video": "video_audio.mp4"}),
+    # ---- A janela na pessoa (13/10/2026; `SWAP_WINDOW` em app/workflows.py): o Animate gera so
+    # o retangulo em que a pessoa esta e os quadros voltam para o video. Num quadro deitado com a
+    # pessoa no meio (`juntos j_base j_janela`, um em cada GPU): 6 s, dois pedacos. O que olhar:
+    # no registro, o tamanho da janela e os segundos por passo de cada um; nos quadros, a borda
+    # da colagem em volta da pessoa (algo "recortado"?), se a pessoa saiu igual nos dois e a
+    # emenda entre os pedacos (`quadros j_janela 70 84`). O "j_vertical" e o caso de uso (video
+    # em pe): diz se a janela chega a valer quando a pessoa enche o quadro.
+    "j_base": ({"mode": "swap", "duration": 6, "quality": "boa", "seed": 12, "expert": {"worker": 0}},
+               {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    "j_janela": ({"mode": "swap", "duration": 6, "quality": "boa", "seed": 12, "expert": {"worker": 1, "window": True}},
+                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    "j_vertical": ({"mode": "swap", "duration": 6, "quality": "boa", "seed": 14, "expert": {"window": True}},
+                   {"start_image": "pessoa.png", "video": "vertical_audio.mp4"}),
+    # ---- A pessoa inteira (13/10/2026; `SWAP_WHOLE`): o recorte do SAM2 completado pelo do BiRefNet
+    # (notebook com `--env PESSOA_INTEIRA=1`). O exemplo inteiro, em que as trancas da pessoa original
+    # voltavam do meio para o fim (`juntos w_base w_inteira`, um em cada GPU). O que olhar: os quadros
+    # do meio para o fim de cada um (`quadros w_inteira 90 148`), e no registro quanto o recorte cresceu.
+    "w_base": ({"mode": "swap", "duration": 9.3, "quality": "boa", "seed": 12, "expert": {"worker": 0}},
+               {"start_image": "pessoa.png", "video": "video.mp4"}),
+    "w_inteira": ({"mode": "swap", "duration": 9.3, "quality": "boa", "seed": 12, "expert": {"worker": 1, "whole": True}},
+                  {"start_image": "pessoa.png", "video": "video.mp4"}),
+    # ---- O rosto em detalhe (13/10/2026; `SWAP_FACE`): uma segunda passada so na cabeca, ampliada.
+    # No quadro deitado o rosto tem uns 90 px em 832 x 480 (`juntos f_base f_rosto`). O que olhar: se
+    # o rosto do f_rosto se parece mais com a foto, se a cabeca casa com o pescoco e o cabelo em
+    # volta (borda da colagem), e no registro o tamanho da janela ("[wan_studio] rosto: ...") e o tempo.
+    "f_base": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 12, "expert": {"worker": 0}},
+               {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    "f_rosto": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 12, "expert": {"worker": 1, "face": True}},
+                {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    # O caso de uso: a foto de uma pessoa num video em pe de 23 s, na qualidade boa, em duas cadeias.
+    "c_humano": ({"mode": "swap", "duration": 23.5, "quality": "boa", "seed": 21, "expert": {"chains": 2}},
+                 {"start_image": "retrato_vertical.png", "video": "vertical_30s.mp4"}),
 
     # So o recorte (a pessoa pintada de vermelho, sem gerar), em cada estrategia: segundos por pedaco.
     **{f"v_{method}": ({"mode": "swap", "duration": 10, "quality": "rapida", "seed": 1,
@@ -307,6 +437,14 @@ def fixture(name):
     elif name == "vertical_audio.mp4":  # o mesmo miolo, com o som
         ffmpeg("-i", fixture("video_audio.mp4"), "-vf", "crop=360:640", "-c:v", "libx264", "-crf", "14",
                "-c:a", "copy", path)
+    elif name == "vertical_30s.mp4":  # o miolo 9:16 do video de 30 s (sem som)
+        ffmpeg("-i", fixture("video_30s.mp4"), "-vf", "crop=360:640", "-an", "-c:v", "libx264", "-crf", "14", path)
+    elif name == "video_largo.mp4":
+        # O exemplo (quadrado) no meio de um quadro 16:9, com as laterais preenchidas por ele mesmo
+        # borrado: a pessoa fica com um terco da largura, que e o caso em que a janela mais rende.
+        ffmpeg("-i", fixture("video_audio.mp4"), "-filter_complex",
+               "[0:v]split[a][b];[a]scale=1136:640,boxblur=24:2[bg];[bg][b]overlay=(W-w)/2:0[v]",
+               "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-crf", "14", "-c:a", "copy", path)
     elif name == "retrato_vertical.png":  # a pessoa de exemplos/ (gerada por IA), cortada em 9:16
         ffmpeg("-i", HERE.parent / "exemplos" / "troca-de-pessoa - imagem usada (pessoa gerada por IA).png",
                "-vf", "crop=ih*9/16:ih", path)
@@ -333,15 +471,32 @@ def attachments(files):
 
 # ---------------------------------------------------------------- sessao
 
+def headers_for(password):
+    token = base64.b64encode(f"wan:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}", "User-Agent": "wan-studio"}
+
+
+def cloud_session():
+    """O mesmo que `session`, para a sessao do Modal: quem sabe o endereco e o atalho de la."""
+    out = subprocess.run([sys.executable, str(CLOUD), "sessao"], capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
+    try:
+        data = json.loads(out.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None, None, (out.stdout + out.stderr).strip()
+    return data["url"], headers_for(data["password"]), ""
+
+
 def session():
     """(url, cabecalhos, registro) da sessao ligada; url None enquanto ela nao anunciou o endereco."""
+    if BACKEND == "nuvem":
+        return cloud_session()
     text = "\n".join(ligar.log_lines(KAUTH, USER, 12))
     found = re.findall(r"(https://[a-z0-9-]+\.trycloudflare\.com)\s+usu.rio: wan\s+senha: (\S+)", text)
     if not found:
         return None, None, text
     url, password = found[-1]
-    token = base64.b64encode(f"wan:{password}".encode()).decode()
-    return url, {"Authorization": f"Basic {token}", "User-Agent": "wan-studio"}, text
+    return url, headers_for(password), text
 
 
 def call(url, auth, path, data=None, content_type=None, method=None, timeout=120):
@@ -395,6 +550,8 @@ def wait_up(need=None, minutes=30):
             if status and status["comfy"] and (need is None or status["models"].get(need, {}).get("ok")):
                 print(stamp(), line, flush=True)
                 return url, auth
+        elif BACKEND == "nuvem":
+            line = "a sessão do Modal ainda não está no ar (python nuvem/ligar.py)"
         else:
             marks = [row for row in text.splitlines()
                      if row.startswith(("baixando ", "Instala", "Iniciando")) or "SystemExit" in row]
@@ -427,10 +584,21 @@ def submit(url, auth, label, params, files):
 
 
 def follow(url, auth, label, job_id, minutes=90):
-    """Acompanha o job ate o fim e baixa o resultado: (arquivo, job)."""
-    began, shown, deadline = time.time(), None, time.time() + minutes * 60
+    """Acompanha o job ate o fim e baixa o resultado: (arquivo, job). Uma queda de conexao
+    passageira (o tunel as vezes derruba uma) nao interrompe: o job segue na GPU."""
+    began, shown, deadline, misses = time.time(), None, time.time() + minutes * 60, 0
     while time.time() < deadline:
-        current = {job["id"]: job for job in jobs_of(url, auth)["jobs"]}.get(job_id)
+        try:
+            listed = jobs_of(url, auth)["jobs"]
+        except (OSError, ValueError, http.client.HTTPException) as error:
+            misses += 1
+            if misses > 30:
+                raise SystemExit(f"{label}: sem resposta da sessao ({error})") from None
+            print(stamp(), f"{label}: sem resposta ({error.__class__.__name__}), tentando de novo", flush=True)
+            time.sleep(20)
+            continue
+        misses = 0
+        current = {job["id"]: job for job in listed}.get(job_id)
         if current is None:
             raise SystemExit(f"{label}: o job sumiu do servidor (o site aberto baixou o resultado antes?)")
         mark = (current["status"], current.get("stage"), round(current["progress"], 2))
@@ -463,6 +631,18 @@ def contact_sheet(path, label, count):
     last = count - 1
     picks = "+".join(f"eq(n\\,{index})" for index in sorted({0, last // 4, last // 2, 3 * last // 4, last}))
     ffmpeg("-i", path, "-vf", f"select='{picks}',scale=-2:320,tile=5x1", "-frames:v", "1", OUT / f"{label}_quadros.png")
+
+
+def frame_strip(label, first, last):
+    """Os quadros de `first` a `last` de um resultado ja baixado, lado a lado: para olhar uma
+    emenda quadro a quadro."""
+    path = OUT / f"{label}.mp4"
+    if not path.exists():
+        raise SystemExit(f"não achei {path}: rode o teste antes")
+    target = OUT / f"{label}_quadros_{first}_{last}.png"
+    ffmpeg("-i", path, "-vf", f"select='between(n\\,{first}\\,{last})',scale=-2:480,tile={last - first + 1}x1",
+           "-frames:v", "1", target)
+    print(target)
 
 
 def ledger():
@@ -583,6 +763,13 @@ def shut_down(url, auth):
             print("guardado:", target, target.stat().st_size, "bytes", flush=True)
     call(url, auth, "/api/shutdown", data=b"{}", content_type="application/json", method="POST")
     print(stamp(), "desligamento pedido", flush=True)
+    if BACKEND == "nuvem":
+        for _ in range(30):
+            time.sleep(5)
+            if cloud_session()[0] is None:
+                print(stamp(), "sessão encerrada", flush=True)
+                return
+        raise SystemExit("a sessão não encerrou em 2 minutos e meio")
     for _ in range(60):
         time.sleep(10)
         state, _failure = ligar.patient_status(KAUTH, USER)
@@ -604,7 +791,11 @@ def main():
     global KAUTH, USER
     command = sys.argv[1] if len(sys.argv) > 1 else "estado"
     OUT.mkdir(parents=True, exist_ok=True)
-    KAUTH, USER = ligar.credentials(browser=False)
+    if command == "quadros":  # so le o que ja foi baixado: nao precisa da sessao
+        frame_strip(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+        return 0
+    if BACKEND != "nuvem":
+        KAUTH, USER = ligar.credentials(browser=False)
     if command == "esperar":
         wait_up(sys.argv[2] if len(sys.argv) > 2 else None)
         return 0
