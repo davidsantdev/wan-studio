@@ -91,9 +91,11 @@ def check(label, condition, detail=""):
 
 
 def run(*args, token=TOKEN, home=None):
-    """Roda o script com a API simulada. `home` isola as credenciais da maquina."""
+    """Roda o script com a API simulada. `home` isola as credenciais da maquina; o token e a
+    pagina de abertura ficam numa pasta do teste, e os de verdade nem sao lidos."""
     env = {**os.environ, "KAGGLE_API_URL": f"http://127.0.0.1:{PORT}/v1", "WAN_POLL_SECONDS": "0.1",
-           "PYTHONIOENCODING": "utf-8", "USERPROFILE": str(home or EMPTY_HOME), "HOME": str(home or EMPTY_HOME)}
+           "PYTHONIOENCODING": "utf-8", "USERPROFILE": str(home or EMPTY_HOME), "HOME": str(home or EMPTY_HOME),
+           "WAN_TOKEN_FILE": str(TOKEN_FILE), "WAN_OPENER_FILE": str(OPENER_FILE)}
     env.pop("KAGGLE_API_TOKEN", None)
     if token:
         env["KAGGLE_API_TOKEN"] = token
@@ -108,22 +110,19 @@ def pushes():
 
 def opener_data():
     """O que a pagina de abertura entrega ao site (o codigo depois de "#c=")."""
-    opener = (FREE / "abrir.html").read_text(encoding="utf-8") if (FREE / "abrir.html").exists() else ""
+    opener = (OPENER_FILE).read_text(encoding="utf-8") if (OPENER_FILE).exists() else ""
     if "#c=" not in opener:
         return {}
     return json.loads(base64.urlsafe_b64decode(opener.split("#c=")[1].split('"')[0] + "=="))
 
 
 def main():
-    saved_token = (FREE / "kaggle_token.txt").read_text(encoding="utf-8") if (FREE / "kaggle_token.txt").exists() else None
-    if saved_token is not None:  # o teste nao pode usar nem estragar a credencial de verdade
-        (FREE / "kaggle_token.txt").unlink()
-    try:
-        scenarios()
-    finally:
-        if saved_token is not None:
-            (FREE / "kaggle_token.txt").write_text(saved_token, encoding="utf-8")
-        (FREE / "abrir.html").unlink(missing_ok=True)
+    # A credencial e a pagina de abertura de verdade ficam intocadas: o script as procura na
+    # pasta do teste (WAN_TOKEN_FILE e WAN_OPENER_FILE em `run`).
+    OPENER_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TOKEN_FILE.unlink(missing_ok=True)
+    OPENER_FILE.unlink(missing_ok=True)
+    scenarios()
     print(f"\n{len(failures)} falha(s)" + (": " + "; ".join(failures) if failures else ""))
     return 1 if failures else 0
 
@@ -145,7 +144,7 @@ def scenarios():
     cells = notebook.get("cells", [])
     check("1e notebook com celulas em texto unico e sem saidas", len(cells) == 4 and all(isinstance(c["source"], str) for c in cells)
           and all(c.get("outputs") == [] for c in cells if c["cell_type"] == "code") and "launcher.install()" in cells[1]["source"])
-    opener = (FREE / "abrir.html").read_text(encoding="utf-8") if (FREE / "abrir.html").exists() else ""
+    opener = (OPENER_FILE).read_text(encoding="utf-8") if (OPENER_FILE).exists() else ""
     link = opener.split('location.replace("')[1].split('")')[0] if "location.replace" in opener else ""
     data = json.loads(base64.urlsafe_b64decode(link.split("#c=")[1] + "==")) if "#c=" in link else {}
     pairing = json.loads((FREE / "pairing.json").read_text(encoding="utf-8"))
@@ -154,7 +153,7 @@ def scenarios():
     check("1g toda chamada vai autenticada", all(auth == f"Bearer {TOKEN}" for _, auth, _ in kaggle["requests"]))
 
     # ---- 2. ja ligada: nao envia de novo (um segundo envio abriria outra sessao)
-    (FREE / "abrir.html").unlink(missing_ok=True)
+    (OPENER_FILE).unlink(missing_ok=True)
     kaggle.update(status="RUNNING", requests=[])
     code, out = run()
     check("2 ja ligada: so abre o site", code == 0 and "já está ligada" in out and not pushes())
@@ -190,12 +189,12 @@ def scenarios():
 
     # ---- 7b. conta sem telefone verificado: o Kaggle aceita, mas a sessao sobe sem internet
     # e o notebook para em segundos (foi o que aconteceu na primeira execucao real)
-    (FREE / "abrir.html").unlink(missing_ok=True)
+    (OPENER_FILE).unlink(missing_ok=True)
     kaggle.update(status="COMPLETE", requests=[], log=NO_INTERNET)
     code, out = run()
     check("7b sem internet: avisa o motivo e como verificar o telefone", code == 1 and "parou logo no começo: Sem internet" in out
           and "Phone Verification" in out and "Pronto." not in out, out.strip().splitlines()[-1][:70])
-    check("7c e nao abre o site dizendo que esta ligando", not (FREE / "abrir.html").exists())
+    check("7c e nao abre o site dizendo que esta ligando", not (OPENER_FILE).exists())
     kaggle.update(log=INSTALLING)
 
     # ---- 7d. comando registro
@@ -231,6 +230,8 @@ if __name__ == "__main__":
     WORK = Path(__file__).resolve().parent / ".work"
     EMPTY_HOME = WORK / "home_vazio"
     EMPTY_HOME.mkdir(parents=True, exist_ok=True)
+    TOKEN_FILE = WORK / "credenciais" / "kaggle_token.txt"
+    OPENER_FILE = WORK / "credenciais" / "abrir.html"
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeKaggle)
     PORT = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()

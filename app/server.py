@@ -555,6 +555,8 @@ async def finish_task(app, worker, job, task, entry):
                 return fail(job, "o ComfyUI terminou sem gerar o arquivo")
             target = OUTPUTS / (job["id"] + EXTENSIONS[job["kind"]])
             await download(app, worker, items[0], target)
+            if job["mode"] == "face":  # o tamanho de verdade (a foto pode ter vindo girada)
+                job["width"], job["height"] = image_size(target.read_bytes()[:64 * 1024]) or (job["width"], job["height"])
             return complete(job, target)
         # Com interpolacao, o pedaco traz tambem os quadros intermediarios (stitch.fine); o
         # pedaco bruto de um job com restauracao ainda nao os tem.
@@ -937,7 +939,7 @@ async def launch(app, jobs, params, files):
     try:
         # Na troca de pessoa o video ja diz o que acontece: o prompt e opcional.
         text = first["prompt"] or workflows.ANIMATE_PROMPT
-        if params.get("auto_enhance") and enhancer.state == "ready" and not swap:
+        if params.get("auto_enhance") and enhancer.state == "ready" and first["mode"] not in ("swap", "face"):
             try:
                 text = await asyncio.wait_for(
                     enhancer.enhance(text, first["mode"], first["camera"] != "none"),
@@ -1051,6 +1053,26 @@ async def save_limited(part, target, limit):
     return size
 
 
+def image_size(data):
+    """(largura, altura) de um PNG ou de um JPEG, pelo cabecalho; None se nao der para saber."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if data[:2] == b"\xff\xd8":
+        index = 2
+        while index + 9 < len(data):
+            if data[index] != 0xFF:
+                index += 1
+                continue
+            marker = data[index + 1]
+            if marker in (0xD8, 0x01, 0xFF) or 0xD0 <= marker <= 0xD7:
+                index += 1 if marker == 0xFF else 2
+                continue
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                return int.from_bytes(data[index + 7:index + 9], "big"), int.from_bytes(data[index + 5:index + 7], "big")
+            index += 2 + int.from_bytes(data[index + 2:index + 4], "big")
+    return None
+
+
 async def read_form(request, workdir):
     """Le o formulario: parametros, imagens (na memoria) e video (em `workdir`)."""
     params, images, video = {}, {}, None
@@ -1090,8 +1112,11 @@ async def accept(request, batch, workdir):
         spec = workflows.resolve(params, "start_image" in images, "end_image" in images,
                                  video is not None)
         swap = spec["mode"] == "swap"
-        # Camera, efeito e estilo nao se aplicam a troca: o video dita a cena.
-        look = {key: "none" if swap else str(params.get(key, "none"))
+        animate = spec["mode"] in ("swap", "face")  # as trocas (de pessoa e de rosto) usam o Animate
+        if spec["mode"] == "face":  # o tamanho do resultado e o da foto que recebe o rosto
+            spec["width"], spec["height"] = image_size(images["end_image"][1]) or (0, 0)
+        # Camera, efeito e estilo nao se aplicam as trocas: o video (ou a foto) dita a cena.
+        look = {key: "none" if animate else str(params.get(key, "none"))
                 for key in ("camera", "effect", "style")}
         presets.compose_prompt("x", look["camera"], look["effect"], look["style"])
         count = 1 if swap else min(max(int(params.get("count", 1)), 1), MAX_BATCH)
@@ -1104,7 +1129,7 @@ async def accept(request, batch, workdir):
 
     needed = workflows.required_set(spec["model"], spec["mode"])
     wanted = {"t2v": (), "img": (), "i2v": ("start_image",), "flf": ("start_image", "end_image"),
-              "swap": ("start_image",)}
+              "swap": ("start_image",), "face": ("start_image", "end_image")}
     try:
         sets = await catalog(app)
         if not sets[needed]["ok"]:
@@ -1134,7 +1159,7 @@ async def accept(request, batch, workdir):
     except RuntimeError as exc:
         return json_error(str(exc), 502)
     spec["fast"] = spec["fast"] and sets[needed]["turbo"]
-    if swap and not spec["fast"]:
+    if animate and not spec["fast"]:
         return json_error("a LoRA de poucos passos do Animate ainda não está instalada na GPU", 400)
 
     now = time.time()

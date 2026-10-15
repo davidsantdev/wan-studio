@@ -148,8 +148,9 @@ def internet_problem():
 
 
 def install():
-    """Instala o ComfyUI e baixa o conjunto minimo (Wan 2.2 5B; na sessao so de troca de pessoa,
-    o que os modelos dela tem em comum). Leva uns 4 minutos no Kaggle."""
+    """Instala o ComfyUI e baixa o codificador de texto, que todos os modos usam: o estudio abre
+    em uns 3 minutos no Kaggle, e os modelos de cada modo chegam depois (start_extras), a troca
+    de pessoa primeiro."""
     problem = internet_problem()
     if problem is not None:
         raise SystemExit(

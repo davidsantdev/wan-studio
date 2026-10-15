@@ -5,7 +5,7 @@ site ja pareado. No Windows: dois cliques em "Ligar GPU rapida.bat".
   python nuvem/ligar.py status       a sessao, a placa e o credito gasto no mes
   python nuvem/ligar.py registro     o que a maquina esta fazendo
   python nuvem/ligar.py desligar     desliga a sessao (para de gastar credito)
-  python nuvem/ligar.py modelos      baixa os modelos que faltam (--tudo: tambem o 5B e o 14B)
+  python nuvem/ligar.py modelos      baixa os modelos que faltam (--tudo: tambem o 14B)
   python nuvem/ligar.py publicar     envia o codigo de novo ao Modal
   python nuvem/ligar.py sessao       endereco e senha da sessao, em JSON (para os testes)
 
@@ -203,7 +203,7 @@ def interesting(line):
 def download_models(everything=False):
     import modal
 
-    what = "todos os modelos (uns 85 GB)" if everything else "os modelos da troca de pessoa (uns 36 GB)"
+    what = "todos os modelos (uns 85 GB)" if everything else "os modelos da troca de pessoa e do 5B (uns 48 GB)"
     print(f"Baixando {what} para o seu volume no Modal. É uma vez só; leva de 5 a 15 minutos e")
     print("não usa GPU nem a internet deste computador.\n", flush=True)
     call = modal.Function.from_name(NAME, "baixar").spawn(everything)
@@ -433,7 +433,7 @@ def main():
                         choices=("ligar", "status", "registro", "desligar", "modelos", "publicar", "sessao"))
     parser.add_argument("--gpu", default=DEFAULT_GPU, help="a placa (L40S, A100, H100, H200, B200…)")
     parser.add_argument("--ocioso", type=float, default=5, help="minutos sem uso até desligar sozinha")
-    parser.add_argument("--tudo", action="store_true", help="modelos: baixa também o 5B e o 14B")
+    parser.add_argument("--tudo", action="store_true", help="modelos: baixa também o 14B")
     parser.add_argument("--forcar", action="store_true", help="publicar: mesmo sem mudança no código")
     parser.add_argument("--sem-navegador", action="store_true", help="não abre o site ao terminar")
     args = parser.parse_args()

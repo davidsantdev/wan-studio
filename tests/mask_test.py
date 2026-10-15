@@ -460,6 +460,43 @@ def main():
           both["WanStudioHeadWindow"][1]["images"] == [both["WanStudioPaste"][0], 0]
           and "WanStudioFacePaste" not in windowed({})[1])
 
+    # ---- Trocar rosto numa foto (modo "face"): so o rosto, da testa ao queixo.
+    face = np.zeros((68, 3), dtype=np.float32)
+    for index in range(68):  # um rosto oval em volta de (0.5, 0.3) num quadro de 100 x 100
+        angle = 2 * np.pi * index / 68
+        face[index] = (0.5 + 0.08 * np.cos(angle), 0.3 + 0.1 * np.sin(angle), 0.9)
+    ellipse = node.face_ellipse({"keypoints_face": face}, 100, 100)
+    masks = node.face_masks((2, 100, 100), [{"keypoints_face": face}, {}], 100, 100)
+    check("U1 o recorte do rosto: a elipse dos pontos do rosto, com a testa, e o quadro sem rosto fica com a do vizinho",
+          ellipse is not None and abs(ellipse[0] - 50) < 1 and ellipse[1] < 30 and masks[0, 30, 50] and masks[0, 16, 50]
+          and not masks[0, 45, 50] and not masks[0, 30, 65] and (masks[1] == masks[0]).all()
+          and node.face_ellipse({"keypoints_face": face[:4]}, 100, 100) is None, str(ellipse))
+    front = body(**{"0": (0.5, 0.3), "14": (0.47, 0.27), "15": (0.53, 0.27)})
+    back = body(**{"1": (0.5, 0.45), "2": (0.4, 0.45), "5": (0.6, 0.45)})  # de costas: sem nariz nem olhos
+    check("U1b de costas (a pose nao acha nariz nem olho) nao ha rosto a trocar, mesmo com pontos do rosto arriscados",
+          node.face_ellipse({"keypoints_face": face, "keypoints_body": front}, 100, 100) is not None
+          and node.face_ellipse({"keypoints_face": face, "keypoints_body": back}, 100, 100) is None)
+    photo = workflows.resolve({"mode": "face", "seed": 1}, True, True)
+    photo_nodes = workflows.build(photo, {**files, "lora": "l.safetensors"}, "p", "n", "x", start_image="rosto.png", end_image="corpo.png")[0]
+    photo_kinds = {item["class_type"]: (key, item["inputs"]) for key, item in photo_nodes.items()}
+    head_inputs = photo_kinds["WanStudioHeadWindow"][1]
+    check("U2 grafo da troca de rosto: a foto vira um video parado, so o rosto e refeito (mesmo grande) e sai a imagem do meio",
+          photo_kinds["RepeatImageBatch"][1]["amount"] == 5 and head_inputs["region"] == "rosto" and head_inputs["always"] is True
+          and "mask" not in head_inputs and photo_kinds["ImageFromBatch"][1]["batch_index"] == 2
+          and photo_kinds["SaveImage"][1]["images"] == [photo_kinds["ImageFromBatch"][0], 0]
+          and photo_kinds["WanStudioFitReference"][1]["region"] == "cabeca" and photo["kind"] == "image")
+    hair = workflows.build({**photo, "hair": True}, {**files, "lora": "l.safetensors"}, "p", "n", "x", start_image="r.png",
+                           end_image="c.png")[0]
+    refused = []
+    for has_face, has_body in ((False, True), (True, False)):
+        try:
+            workflows.resolve({"mode": "face"}, has_face, has_body)
+        except ValueError as error:
+            refused.append(str(error))
+    check("U3 com o cabelo junto refaz a cabeca inteira; sem uma das fotos, recusa dizendo qual falta",
+          next(item for item in hair.values() if item["class_type"] == "WanStudioHeadWindow")["inputs"]["region"] == "cabeca"
+          and len(refused) == 2 and "rosto" in refused[0] and "receber o rosto" in refused[1], str(refused))
+
     first = windowed({"window": True, "window_margin": 96})[1]
     loose = windowed({"window": True}, replace=False)[1]
     check("J12 primeiro pedaco: sem cor a igualar; sem manter o cenario nao ha recorte, e a janela nao entra",

@@ -901,6 +901,49 @@ def head_masks(masks, heads, reach=FACE_REACH):
     return result
 
 
+# O rosto so conta como a vista se a pose acha o nariz e um olho com esta certeza: de costas, ela
+# ainda arrisca os pontos do rosto (no exemplo oficial, na parte de tras da cabeca).
+FACE_VISIBLE = 0.5
+
+
+def face_ellipse(meta, width, height):
+    """(x, y, raio na largura, raio na altura) da elipse do rosto, em pixels, pelos pontos do
+    rosto da pose (sobrancelhas, olhos, nariz, boca e queixo), com a testa acima deles; None se
+    a pose achou pouco do rosto, ou se ele nao esta a vista (pessoa de costas)."""
+    face = meta.get("keypoints_face") if meta else None
+    if face is None:
+        return None
+    body = meta.get("keypoints_body")
+    if body is not None and not (len(confident(body, width, height, (0,), FACE_VISIBLE))
+                                 and len(confident(body, width, height, (14, 15), FACE_VISIBLE))):
+        return None
+    points = confident(face, width, height)
+    if len(points) < 8:
+        return None
+    (left, top), (right, bottom) = points.min(axis=0), points.max(axis=0)
+    wide, tall = right - left, bottom - top
+    top -= 0.35 * tall  # a testa: os pontos param nas sobrancelhas
+    bottom += 0.05 * tall
+    left, right = left - 0.08 * wide, right + 0.08 * wide
+    return (left + right) / 2, (top + bottom) / 2, max(2.0, (right - left) / 2), max(2.0, (bottom - top) / 2)
+
+
+def face_masks(shape, metas, width, height):
+    """So o rosto (a elipse de `face_ellipse`) em cada quadro (N x A x L); onde a pose nao achou o
+    rosto, vale o do quadro mais proximo. Tudo vazio se nao achou em nenhum."""
+    ellipses = [face_ellipse(meta, width, height) for meta in metas]
+    known = [index for index, ellipse in enumerate(ellipses) if ellipse]
+    result = np.zeros(shape, dtype=bool)
+    if not known:
+        return result
+    yy, xx = np.ogrid[:shape[1], :shape[2]]
+    for index in range(shape[0]):
+        own = ellipses[index] if index < len(ellipses) else None
+        x, y, rx, ry = own or ellipses[min(known, key=lambda other: abs(other - index))]
+        result[index] = ((xx - x) / rx) ** 2 + ((yy - y) / ry) ** 2 <= 1
+    return result
+
+
 def _zoomed(frames, left, top, side, size, mode="bicubic"):
     """O quadrado (`left`, `top`, `side`) de cada quadro (N x A x L x C), ampliado a `size`."""
     part = frames[:, top:top + side, left:left + side, :].movedim(-1, 1)
@@ -918,9 +961,14 @@ class WanStudioHeadWindow:
         return {"required": {
             "images": ("IMAGE", {"tooltip": "Os quadros ja gerados do pedaco, inteiros."}),
             "pose_data": ("POSEDATA", {"tooltip": "A pose do video de origem, no quadro inteiro."}),
-            "mask": ("MASK", {"tooltip": "O recorte da pessoa que a primeira passada usou."}),
         }, "optional": {
+            "mask": ("MASK", {"tooltip": "O recorte da pessoa que a primeira passada usou (sem ele: o quadro todo)."}),
             "motion": ("IMAGE", {"tooltip": "Os quadros de que o pedaco continua, inteiros."}),
+            "region": (["cabeca", "rosto"], {"default": "cabeca",
+                                             "tooltip": "cabeca: o rosto e o cabelo em volta; rosto: so o rosto, da testa ao queixo."}),
+            "always": ("BOOLEAN", {"default": False,
+                                   "tooltip": "Refaz mesmo com o rosto grande, e para com erro se nao achar rosto (troca de rosto em foto)."}),
+            "max_size": ("INT", {"default": FACE_SIZES[1], "min": 256, "max": 1024, "step": 16}),
         }}
 
     RETURN_TYPES = ("IMAGE", "MASK", "POSEDATA", "IMAGE", "INT", "INT", "INT", "INT", "BOOLEAN", "MASK")
@@ -929,17 +977,28 @@ class WanStudioHeadWindow:
     CATEGORY = "Wan Studio"
     DESCRIPTION = "A cabeca da pessoa, ampliada, para refazer o rosto com mais detalhe."
 
-    def cut(self, images, pose_data, mask, motion=None):
+    def cut(self, images, pose_data, mask=None, motion=None, region="cabeca", always=False, max_size=FACE_SIZES[1]):
         count, height, width, _ = images.shape
-        metas = pose_data.get("pose_metas_original") or []
-        box, heads = head_window(metas[:count], width, height)
+        metas = (pose_data.get("pose_metas_original") or [])[:count]
+        if mask is None:
+            mask = torch.ones((count, height, width))
+        box, heads = head_window(metas, width, height)
+        if always and box is None:
+            raise ValueError("não encontrei um rosto na imagem")
         if box is None or tuple(mask.shape[-2:]) != (height, width):
             box, heads = (0, 0, min(width, height)), []
         left, top, side = box
-        size = zoom_size(side)
-        active = bool(heads) and size / side >= FACE_MIN_ZOOM
+        size = zoom_size(side, sizes=(FACE_SIZES[0], max_size))
+        active = bool(heads) and (always or size / side >= FACE_MIN_ZOOM)
         heads = heads + [None] * (count - len(heads))
-        small = torch.from_numpy(head_masks(mask[:count].cpu().numpy(), heads)[:, top:top + side, left:left + side].astype(np.float32))
+        people = mask[:count].cpu().numpy()
+        if region == "rosto":
+            only = face_masks(people.shape, metas, width, height) & (people > 0.5)
+            if always and not only.any():
+                raise ValueError("não encontrei o rosto inteiro na imagem (de frente funciona melhor)")
+        else:
+            only = head_masks(people, heads)
+        small = torch.from_numpy(only[:, top:top + side, left:left + side].astype(np.float32))
         big = torch.nn.functional.interpolate(small[:, None], (size, size), mode="nearest")[:, 0]
         moved = dict(pose_data)
         moved["pose_metas"] = [copy.deepcopy(meta).crop(left, top, left + side, top + side).resize(size, size)

@@ -82,7 +82,7 @@ SIZES = {
     },
 }
 DURATIONS = (3, 5)
-MODES = ("t2v", "i2v", "flf", "img", "swap")
+MODES = ("t2v", "i2v", "flf", "img", "swap", "face")
 MAX_SEED = 2**48
 
 # O FastWan 5B foi destilado (DMD) para exatamente estes tres instantes, sem CFG.
@@ -195,7 +195,7 @@ SWAP_FACE = False
 
 def required_set(model, mode):
     """Qual conjunto de arquivos (chave de CATALOG) o job precisa."""
-    if mode == "swap":
+    if mode in ("swap", "face"):
         return "animate"
     if model == "5b":
         return "5b"
@@ -281,6 +281,8 @@ def resolve(params, has_start, has_end, has_video=False):
         raise ValueError("modo inválido")
     if mode == "swap":
         return _resolve_swap(params, has_start, has_video)
+    if mode == "face":
+        return _resolve_face(params, has_start, has_end)
 
     model = params.get("model", "5b")
     if model not in SIZES:
@@ -439,6 +441,48 @@ def _resolve_swap(params, has_person, has_video):
     }
 
 
+# Trocar rosto numa foto (modo "face"): o rosto da primeira imagem entra na pessoa da segunda,
+# que fica com o corpo, a roupa, o cabelo (a menos que `hair`), a expressao e o cenario dela. E a
+# segunda passada do rosto em detalhe feita sobre uma foto: o Animate refaz so o rosto, ampliado
+# ate FACE_IMAGE_SIZE, com o rosto da primeira imagem como referencia, e o resto da foto fica
+# com os pixels dela. A foto vira um video parado de FACE_FRAMES quadros (o Animate gera video)
+# e sai o do meio.
+FACE_IMAGE_SIZE = 768
+FACE_FRAMES = 5
+
+
+def _resolve_face(params, has_face, has_body):
+    if not has_face:
+        raise ValueError("envie a imagem do rosto")
+    if not has_body:
+        raise ValueError("envie a imagem da pessoa que vai receber o rosto")
+    expert = params.get("expert") if isinstance(params.get("expert"), dict) else {}
+    bad = "ajuste de teste inválido"
+    if expert.get("onnx", "gpu") not in ("cpu", "gpu"):
+        raise ValueError(bad)
+    return {
+        "mode": "face",
+        "kind": "image",
+        "model": "animate",
+        "fast": True,
+        "steps": _number(expert, "steps", 4, 1, 30, bad, int),
+        # O cabelo vem junto do rosto (a cabeca inteira), em vez de ficar o da segunda imagem.
+        "hair": bool(params.get("hair", False)),
+        "onnx": expert.get("onnx", "gpu"),
+        "max_size": _number(expert, "max_size", FACE_IMAGE_SIZE, 256, 1024, bad, int),
+        "pin": _number(expert, "worker", None, 0, 16, bad, int),
+        "replace": True,
+        "length": FACE_FRAMES,
+        "overlap": SWAP_OVERLAP,
+        "fps": SWAP_FPS,
+        # O tamanho e o da segunda imagem: o servidor o le dela (e confere no resultado).
+        "width": 0,
+        "height": 0,
+        "duration": 0,
+        "seed": _seed(params),
+    }
+
+
 def warm_spec():
     """O menor pedaco de troca de pessoa que faz o ComfyUI carregar o que um pedaco de verdade
     usa (modelo, codificador de texto, VAE, deteccao de pose): o servidor roda um em cada GPU
@@ -527,6 +571,8 @@ def build(spec, files, positive, negative, prefix, start_image=None, end_image=N
     """
     if spec["mode"] == "swap":
         return _build_animate(spec, files, positive, negative, prefix, start_image, video, motion)
+    if spec["mode"] == "face":
+        return _build_face_image(spec, files, positive, negative, prefix, start_image, end_image)
     builder = _build_5b if spec["model"] == "5b" else _build_14b
     return builder(spec, files, positive, negative, prefix, start_image, end_image)
 
@@ -709,15 +755,17 @@ def _animate_inputs(g, files, frames, width, height, replace, onnx, method=MASK_
     return driving
 
 
-def _face_pass(g, spec, files, model, positive, negative, vae, vision, frames, driving, mask, person, motion=None):
+def _face_pass(g, spec, files, model, positive, negative, vae, vision, frames, driving, mask, person, motion=None,
+               **window):
     """A segunda passada do rosto em detalhe (`SWAP_FACE`) sobre os quadros ja gerados
     (`frames`): a cabeca e ampliada, refeita pelo Animate com o recorte da cabeca da imagem da
-    pessoa como referencia e posta de volta. `mask` e o recorte da pessoa no quadro inteiro;
-    `motion`, os quadros de que o pedaco continua. Devolve (quadros, sampler)."""
+    pessoa como referencia e posta de volta. `mask` e o recorte da pessoa no quadro inteiro
+    (None: o quadro todo); `motion`, os quadros de que o pedaco continua; `window`, opcoes do
+    no da cabeca (region, always, max_size). Devolve (quadros, sampler)."""
     detected = driving["face_video"][0]
     detector = g.nodes[detected]["inputs"]["model"][0]
-    head = g.add("WanStudioHeadWindow", images=frames, pose_data=[detected, 0], mask=mask,
-                 **({"motion": motion} if motion else {}))
+    head = g.add("WanStudioHeadWindow", images=frames, pose_data=[detected, 0],
+                 **({"mask": mask} if mask else {}), **({"motion": motion} if motion else {}), **window)
     side, size = [head, 6], [head, 7]
     found = g.add("PoseAndFaceDetection", model=[detector, 0], images=[person, 0], width=size, height=size)
     face = g.add("WanStudioFitReference", image=[person, 0], pose_data=[found, 0], bboxes=[found, 3],
@@ -748,6 +796,34 @@ def _face_pass(g, spec, files, model, positive, negative, vae, vision, frames, d
     g.stage("refazendo o rosto", head, found, face, reference, seen, pose, black, background, animate)
     g.stage("finalizando", trimmed, decoded, small, pasted)
     return pasted, sampler
+
+
+def _build_face_image(spec, files, positive, negative, prefix, face_image, body_image):
+    """Trocar rosto numa foto (modo "face"; veja FACE_IMAGE_SIZE): o rosto de `face_image` na
+    pessoa de `body_image`. Devolve (grafo, samplers, etapas), como `build`."""
+    g = _Graph()
+    vae = g.add("VAELoader", vae_name=files["vae"])
+    pos, neg = _text(g, files, positive, negative)
+    model = _load_unet(g, files["unet"])
+    model = g.add("LoraLoaderModelOnly", model=[model, 0], lora_name=files["lora"], strength_model=1.0)
+    if files.get("relight"):  # a luz do rosto novo acompanha a da foto
+        model = g.add("LoraLoaderModelOnly", model=[model, 0], lora_name=files["relight"], strength_model=1.0)
+    model = g.add("ModelSamplingSD3", model=[model, 0], shift=8.0)
+    vision = g.add("CLIPVisionLoader", clip_name=files["clip_vision"])
+    person = g.add("LoadImage", image=face_image)
+    body = g.add("LoadImage", image=body_image)
+    frames = g.add("RepeatImageBatch", image=[body, 0], amount=spec["length"])
+    detector = _detector(g, files, spec["onnx"])
+    g.stage_since("carregando o modelo", 0)
+    detected = g.add("PoseAndFaceDetection", model=[detector, 0], images=[frames, 0], width=1024, height=1024)
+    g.stage("analisando a imagem", detected)
+    images, sampler = _face_pass(g, spec, files, model, pos, neg, vae, vision, [frames, 0], {"face_video": [detected, 1]},
+                                 None, person, region="cabeca" if spec.get("hair") else "rosto", always=True,
+                                 max_size=spec["max_size"])
+    single = g.add("ImageFromBatch", image=[images, 0], batch_index=spec["length"] // 2, length=1)
+    save = g.add("SaveImage", images=[single, 0], filename_prefix=f"wanstudio/{prefix}")
+    g.stage("finalizando", single, save)
+    return g.nodes, [sampler], g.stages
 
 
 def _window_inputs(g, files, frames, width, height, spec, detector=None, motion=None):

@@ -4,10 +4,11 @@
 #   MODELS=5b    Wan 2.2 5B + LoRA turbo                      (12 GB de VRAM, ~25 GB de disco)
 #   MODELS=14b   Wan 2.2 14B fp8, texto e imagem -> video     (24 GB de VRAM, ~80 GB)
 #   MODELS=all   os dois acima + Animate (troca de pessoa)    (24 GB de VRAM, ~125 GB)
-#   MODELS=free  5B e, enquanto houver disco: melhorador de prompt, Animate e 14B, em GGUF Q4
-#                (GPUs gratuitas: Kaggle, Colab, Lightning AI). Numa placa de 24 GB ou mais o
-#                Animate vem em fp8, que e o que a qualidade "ultra" da troca de pessoa usa.
-#                Com SO_TROCA=1, so a troca de pessoa: 27 GB em vez de 83, e pronta mais cedo.
+#   MODELS=free  primeiro a troca de pessoa (Animate); depois, enquanto houver disco, o 5B
+#                (imagem e video rapido), o melhorador de prompt e o 14B, em GGUF Q4 (GPUs
+#                gratuitas: Kaggle, Colab, Lightning AI). Numa placa de 24 GB ou mais o Animate
+#                vem em fp8, que e o que a qualidade "ultra" da troca de pessoa usa.
+#                Com SO_TROCA=1, so a troca de pessoa: 27 GB em vez de 83.
 #
 #   PHASE=all|core|extras|models
 #                           core vai ate o 5B ficar pronto; extras baixa o resto (MODELS=free);
@@ -15,7 +16,7 @@
 #                           nada: para um disco de modelos preparado a parte (nuvem/)
 #   NO_VENV=1               usa o Python do sistema (notebooks)
 #   SO_TROCA=1              MODELS=free sem o 5B, o 14B e o melhorador de prompt: a sessao so
-#                           troca pessoa em video (e o que o notebook gerado usa; veja free/build.py)
+#                           troca pessoa (`python free/build.py --so-troca`)
 #   SKIP_MODELS=1           core instala tudo e nao baixa modelo nenhum (imagem pronta, sem GPU)
 #   KEEP_TORCH=1            nao troca o PyTorch instalado, mesmo sem GPU a vista (idem)
 #   TORCH_INDEX=cu130       troca o PyTorch pelo da mesma versao compilado para outro CUDA. Com o
@@ -382,7 +383,8 @@ core_models() {
   fetch "$W21/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors" text_encoders
   case "$MODELS" in
     5b) set_5b ;;
-    free) if [ -z "${SO_TROCA:-}" ]; then set_5b; fi ;;  # so a troca: o Animate vem em `extras`
+    # free: o estudio abre ja com o codificador de texto; a troca de pessoa, o 5B e o resto
+    # chegam em `extras`, nessa ordem.
     14b) set_14b_fp8 t2v; set_14b_fp8 i2v ;;
     all) set_5b; set_14b_fp8 t2v; set_14b_fp8 i2v; set_animate fp8 ;;
   esac
@@ -397,6 +399,10 @@ extras() {
   if have_room "$need" "o Wan 2.2 Animate (troca de pessoa)"; then
     note "Wan 2.2 Animate, troca de pessoa ($(( need - 1 )) GB)"
     set_animate "$kind" || echo "aviso: o download do Animate falhou" >&2
+  fi
+  if [ -z "${SO_TROCA:-}" ] && have_room 13 "o Wan 2.2 5B"; then
+    note "Wan 2.2 5B, imagem e vídeo rápido (12 GB)"
+    set_5b || echo "aviso: o download do 5B falhou" >&2
   fi
   if wants_enhancer && have_room 9 "o melhorador de prompt"; then
     note "melhorador de prompt (8 GB)"

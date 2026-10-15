@@ -17,9 +17,9 @@
   <main class="layout">
     <form id="form" class="panel" autocomplete="off">
       <div class="panel-scroll">
-      <h1 id="focus-title" class="panel-title" hidden>Trocar pessoa em vídeo</h1>
       <div class="tabs" data-key="mode" role="tablist">
         <button type="button" class="tab" role="tab" data-value="swap">Trocar pessoa</button>
+        <button type="button" class="tab" role="tab" data-value="face">Trocar rosto</button>
         <button type="button" class="tab" role="tab" data-value="t2v">Texto → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="i2v">Imagem → Vídeo</button>
         <button type="button" class="tab" role="tab" data-value="flf">Início + Fim</button>
@@ -36,7 +36,7 @@
         </label>
         <label class="drop" data-frame="end_image" hidden>
           <input type="file" accept="image/*" hidden>
-          <span class="drop-label">Frame final<small>clique ou arraste uma imagem</small></span>
+          <span class="drop-label"><span class="drop-title">Frame final</span><small>clique ou arraste uma imagem</small></span>
           <img alt="Frame final escolhido" hidden>
           <button type="button" class="drop-clear" hidden aria-label="Remover imagem">×</button>
         </label>
@@ -48,6 +48,13 @@
         </label>
       </div>
       <p id="swap-note" class="note" hidden>A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
+      <div id="face-options" class="field" hidden>
+        <p class="note">O rosto da primeira foto entra na pessoa da segunda, que fica com o corpo, a roupa, a expressão e o cenário dela. Funciona melhor com os dois rostos de frente e bem iluminados. Use apenas imagens de pessoas que autorizaram.</p>
+        <label class="check">
+          <input type="checkbox" id="hair">
+          <span>Levar o cabelo junto (troca a cabeça inteira, e não só o rosto)</span>
+        </label>
+      </div>
       <div id="swap-options" class="field" hidden>
         <label class="check">
           <input type="checkbox" id="replace" checked>
@@ -198,6 +205,11 @@
           <span class="starter-art art-swap" aria-hidden="true"><i></i><i></i></span>
           <b>Trocar pessoa</b>
           <small>A pessoa de uma foto entra no lugar da pessoa de um vídeo, com os mesmos movimentos e o mesmo cenário.</small>
+        </button>
+        <button type="button" class="starter-card" data-start="face">
+          <span class="starter-art art-swap" aria-hidden="true"><i></i><i></i></span>
+          <b>Trocar rosto</b>
+          <small>O rosto de uma foto na pessoa de outra foto, que fica com o corpo, a roupa e o cenário dela.</small>
         </button>
         <button type="button" class="starter-card" data-start="i2v">
           <span class="starter-art art-i2v" aria-hidden="true"><i></i></span>

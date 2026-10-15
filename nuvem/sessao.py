@@ -36,7 +36,7 @@ ESSENTIAL = (("text_encoders", "umt5_xxl_fp8_e4m3fn_scaled.safetensors"),
              ("vae", "wan_2.1_vae.safetensors"),
              ("clip_vision", "clip_vision_h.safetensors"),
              ("loras", "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors"))
-# Com este arquivo no volume (`modelos --tudo`), a sessao oferece os outros modos tambem.
+# Com este arquivo no volume (o download de costume), a sessao oferece os outros modos tambem.
 FULL_STUDIO = "wan2.2_ti2v_5B_fp16.safetensors"
 
 
@@ -75,7 +75,7 @@ def missing_models(target):
 
 
 def only_swap(target):
-    """O volume so tem a troca de pessoa (o download de costume; `modelos --tudo` traz o resto)?"""
+    """O volume so tem a troca de pessoa (um download antigo, de antes de o 5B vir junto)?"""
     return not (Path(target) / "diffusion_models" / FULL_STUDIO).exists()
 
 

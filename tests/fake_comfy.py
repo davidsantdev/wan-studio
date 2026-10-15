@@ -46,7 +46,7 @@ INSTALLED = {
 # o que chega depois sao os arquivos de modelo.
 EXTRA_NODES = {"WanAnimateToVideo", "PoseAndFaceDetection", "DrawViTPose", "DownloadAndLoadSAM2Model",
                "WanStudioPersonMask", "WanStudioFitReference", "WanStudioWindow", "WanStudioPaste",
-               "WanStudioWholePerson", "WanStudioHeadWindow", "WanStudioFacePaste"}
+               "WanStudioWholePerson", "WanStudioHeadWindow", "WanStudioFacePaste", "RepeatImageBatch", "ImageFromBatch"}
 # Quanto cada no "demora", para o teste enxergar as etapas.
 SLOW_NODES = {"PoseAndFaceDetection": 2.5, "WanStudioPersonMask": 2.5}
 uploaded = {}  # nome -> conteudo dos arquivos enviados
@@ -171,6 +171,10 @@ async def execute(pid, graph, client_id):
             count = max([other["inputs"]["length"] for other in graph.values()
                          if other["class_type"] == "WanAnimateToVideo"] or [0])
             # (o rosto em detalhe poe um segundo Animate no grafo, com o mesmo numero de quadros)
+            # Uma imagem tirada do lote (a troca de rosto em foto): so ela e gravada.
+            picked = [other["inputs"]["length"] for other in graph.values() if other["class_type"] == "ImageFromBatch"]
+            if picked:
+                count = picked[0]
             if not count:  # restauracao de um pedaco ja gerado: tantos quadros quantos o video enviado tem
                 count = max([video_frames(other["inputs"]["file"]) for other in graph.values()
                              if other["class_type"] == "LoadVideo"] or [1])

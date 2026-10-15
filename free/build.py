@@ -8,7 +8,7 @@ Rode de novo sempre que alterar app/, vm/ ou free/launcher.py:
 
   python free/build.py
   python free/build.py --site https://meu-wan.netlify.app   (quando o site tiver endereco proprio)
-  python free/build.py --tudo   (a sessao baixa tambem os outros modos: texto e imagem -> video)
+  python free/build.py --so-troca   (a sessao baixa so a troca de pessoa: 27 GB em vez de 83)
 
 `free/pairing.json` guarda o segredo que liga o notebook ao site. Ele vai dentro do notebook:
 mantenha o notebook privado e nao publique esse arquivo.
@@ -34,11 +34,12 @@ NOTEBOOK_FILE = FREE / "wan_studio_free.ipynb"
 # de 14B ficam de fora e a sessao nao se anuncia ao site (ele nao pode confundi-la com a GPU).
 CPU_NOTEBOOK_FILE = FREE / "wan_studio_cpu.ipynb"
 # (O Animate em INT8 nao entra: na CPU o passo dele nao terminou em 35 minutos; so a GPU diz.)
-CPU_ENV = {"SKIP_GPU_CHECK": "1", "KEEP_TORCH": "1", "SKIP_SPEEDUPS": "1", "PESSOA_INTEIRA": "1",
+CPU_ENV = {"SKIP_GPU_CHECK": "1", "KEEP_TORCH": "1", "SKIP_SPEEDUPS": "1", "PESSOA_INTEIRA": "1", "SO_TROCA": "1",
            "WAN_COMFY_ARGS": "--cpu", "WAN_SAM2_DEVICE": "cpu", "WARM_UP": "0",
            "WAN_NTFY_URL": "http://127.0.0.1:9"}
-# A sessao de costume so troca pessoa em video: baixa 27 GB em vez de 83, fica pronta mais cedo
-# e deixa as duas GPUs para o video (vm/setup.sh, SO_TROCA). Com --tudo, o estudio inteiro.
+# A sessao de costume tem todos os modos, com a troca de pessoa baixando primeiro. Com
+# --so-troca ela baixa so a troca (27 GB em vez de 83) e deixa as duas GPUs para o video
+# (vm/setup.sh, SO_TROCA).
 SWAP_ENV = {"SO_TROCA": "1"}
 SHORTCUT_FILE = ROOT / "Wan Studio.url"
 BUNDLED = ("app", "vm", "free/launcher.py", "free/pairing.json")
@@ -69,8 +70,9 @@ Para deixar rodando sem esta aba aberta, use *Save Version → Save & Run All (C
 DOWNLOADS = {
     True: "Os modelos da troca de pessoa (Wan 2.2 Animate, 20 GB) continuam baixando em segundo\n"
           "plano por mais uns 3 minutos; o site libera o botão quando ficarem prontos.",
-    False: "O melhorador de prompt, a troca de pessoa (Animate) e o modelo 14B continuam baixando\n"
-           "em segundo plano e aparecem no site quando ficarem prontos.",
+    False: "Os modelos continuam baixando em segundo plano, a troca de pessoa primeiro (uns 3\n"
+           "minutos); depois a geração de imagem e de vídeo (5B), o melhorador de prompt e o 14B.\n"
+           "Cada modo aparece no site quando o modelo dele fica pronto.",
 }
 
 SETUP = '''\
@@ -210,15 +212,14 @@ def main():
     parser.add_argument("--site", help="endereco publico do site, para o notebook montar o link")
     parser.add_argument("--env", action="append", default=[], metavar="NOME=valor",
                         help="variavel de ambiente para a sessao (so para medir na GPU; refaca sem ela depois)")
-    parser.add_argument("--tudo", action="store_true",
-                        help="a sessao baixa tambem o 5B, o 14B e o melhorador de prompt (83 GB), e o site "
-                             "mostra todos os modos; sem isto, so a troca de pessoa")
+    parser.add_argument("--so-troca", action="store_true",
+                        help="a sessao baixa so a troca de pessoa (27 GB em vez de 83) e o site mostra so ela")
     parser.add_argument("--cpu", action="store_true",
                         help="gera o notebook da sessao sem GPU (free/wan_studio_cpu.ipynb), para conferir o "
                              "codigo sem gastar cota: python free/ligar.py --cpu")
     args = parser.parse_args()
     tests = dict(item.split("=", 1) for item in args.env)
-    env = {**({} if args.tudo else SWAP_ENV), **tests}
+    env = {**(SWAP_ENV if args.so_troca else {}), **tests}
 
     pairing = load_pairing(args.site)
     if args.cpu:  # nao mexe no site nem no notebook de verdade
@@ -229,7 +230,7 @@ def main():
     build_notebook(pairing, env)
     if tests:
         print(f"ATENCAO: notebook de teste, com {tests}. Rode de novo sem --env antes de usar de verdade.")
-    print("sessao: " + ("o estudio inteiro (--tudo)" if args.tudo else "so a troca de pessoa (--tudo traz os outros modos)"))
+    print("sessao: " + ("so a troca de pessoa (--so-troca)" if args.so_troca else "todos os modos, a troca de pessoa primeiro"))
     for path in (SITE_FILE, NOTEBOOK_FILE, SHORTCUT_FILE):
         print(f"{path.relative_to(ROOT)}  ({max(1, path.stat().st_size // 1024)} KB)")
     if pairing["site"]:

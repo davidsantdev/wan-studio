@@ -132,23 +132,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // O aviso so aparece depois que a galeria do navegador (IndexedDB) e lida.
   const emptyShown = await page.waitForSelector("#empty", { state: "visible", timeout: 5000 }).then(() => true, () => false);
   check("A5 galeria vazia explica", emptyShown);
-  // Quem nunca conectou ve o que a sessao de costume oferece: so a troca de pessoa, ja aberta.
-  const first = await page.evaluate(() => {
+  // Quem nunca conectou ve o que a sessao de costume oferece: todos os modos, aberto na troca de pessoa.
+  const visibleTabs = () => [...document.querySelectorAll('[data-key="mode"] button')].filter((tab) => tab.offsetParent)
+    .map((tab) => tab.dataset.value).join();
+  const first = await page.evaluate(`(() => {
     const hidden = (selector) => document.querySelector(selector).hidden;
     const top = (selector) => document.querySelector(selector).getBoundingClientRect().top;
     return {
-      modo: state.mode, semAbas: hidden('[data-key="mode"]'), titulo: hidden("#focus-title") ? "" : document.querySelector("#focus-title").textContent,
-      passos: hidden("#howto") ? 0 : document.querySelectorAll("#howto li").length, semCartoes: hidden("#starter"),
+      modo: state.mode, abas: (${visibleTabs})(), semPassos: hidden("#howto"),
+      cartoes: [...document.querySelectorAll("#starter .starter-card")].filter((card) => card.offsetParent).map((card) => card.dataset.start).join(),
       pessoa: !hidden('[data-frame="start_image"]'), video: !hidden('[data-frame="video"]'),
-      semFiltro: hidden('[data-key="filter"]'), vazio: document.querySelector("#empty").textContent,
-      semPresets: hidden("#presets-field"), semModelo: hidden("#model-field"),
+      vazio: document.querySelector("#empty").textContent, semPresets: hidden("#presets-field"),
       // os arquivos, depois o trecho, depois a qualidade (que mostra o tempo que ele leva)
       ordem: top("#frames") < top("#timing-row") && top("#timing-row") < top("#swap-options") && top("#swap-options") < top("#prompt-field"),
     };
-  });
-  check("A5b primeira visita: a pagina ja abre na troca de pessoa, sem as abas dos outros modos, e explica os tres passos",
-    first.modo === "swap" && first.semAbas && first.titulo === "Trocar pessoa em vídeo" && first.passos === 3 && first.semCartoes && first.pessoa
-    && first.video && first.semFiltro && first.semPresets && first.semModelo && first.ordem && first.vazio.includes("foto da pessoa"), JSON.stringify(first));
+  })()`);
+  check("A5b primeira visita: a pagina abre na troca de pessoa, a primeira aba, com os outros modos e um cartao para cada um",
+    first.modo === "swap" && first.abas === "swap,face,t2v,i2v,flf,img" && first.cartoes === "swap,face,i2v,t2v,img" && first.semPassos
+    && first.pessoa && first.video && first.semPresets && first.ordem && first.vazio.includes("O que você quer criar"), JSON.stringify(first));
   await shot("01-desligado");
 
   // ---- B. conectar colando o codigo
@@ -167,14 +168,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   check("B5 pareamento guardado", await page.evaluate(() => Boolean(localStorage.getItem("wan-pairing"))));
   check("B6 melhorador escondido sem 2a GPU", !(await page.isVisible("#enhance")));
   // A pilha deste teste e a do estudio inteiro (sem SO_TROCA): os outros modos aparecem.
-  const whole = await page.evaluate(() => ({
-    abas: [...document.querySelectorAll('[data-key="mode"] button')].filter((tab) => tab.offsetParent).map((tab) => tab.dataset.value).join(),
-    semTitulo: document.querySelector("#focus-title").hidden, semPassos: document.querySelector("#howto").hidden,
+  const whole = await page.evaluate(`({
+    abas: (${visibleTabs})(), semPassos: document.querySelector("#howto").hidden,
     cartoes: [...document.querySelectorAll("#starter .starter-card")].filter((card) => card.offsetParent).map((card) => card.dataset.start).join(),
     guardado: localStorage.getItem("wan-focus"), modo: state.mode, modelo: !document.querySelector("#model-field").hidden,
-  }));
-  check("B7 sessao com o estudio inteiro: as abas e os cartoes dos outros modos aparecem, a troca na frente, e a pagina guarda isso",
-    whole.abas === "swap,t2v,i2v,flf,img" && whole.semTitulo && whole.semPassos && whole.cartoes === "swap,i2v,t2v,img" && whole.guardado === '"all"'
+  })`);
+  // (o estudio inteiro e o padrao: so uma sessao so de troca deixa a marca guardada)
+  check("B7 sessao com o estudio inteiro: as abas e os cartoes de todos os modos, a troca na frente",
+    whole.abas === "swap,face,t2v,i2v,flf,img" && whole.semPassos && whole.cartoes === "swap,face,i2v,t2v,img"
+    && [null, '"all"'].includes(whole.guardado)
     && whole.modo === "swap" && whole.modelo, JSON.stringify(whole));
   await page.click('#starter [data-start="t2v"]');
   check("B8 cada cartao leva ao seu modo", await page.evaluate(() => state.mode === "t2v" && !document.querySelector("#presets-field").hidden));
@@ -302,14 +304,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     return refreshStatus();
   });
   const focused = await page.evaluate(`({
-    modo: state.mode, semAbas: document.querySelector('[data-key="mode"]').hidden, titulo: !document.querySelector("#focus-title").hidden,
+    modo: state.mode, abas: (${visibleTabs})(),
     botoes: [...new Set([...document.querySelectorAll(".card-actions > *")].map((node) => node.textContent))].sort().join(),
     filtro: !document.querySelector('[data-key="filter"]').hidden, guardado: localStorage.getItem("wan-focus"),
     video: !document.querySelector('[data-frame="video"]').hidden, semPresets: document.querySelector("#presets-field").hidden,
     semModelo: document.querySelector("#model-field").hidden,
   })`);
-  check("R1 sessao so de troca: o formulario vai para a troca, as abas somem e os cards perdem o que leva a outro modo",
-    focused.modo === "swap" && focused.semAbas && focused.titulo && focused.botoes === "Baixar,Excluir" && focused.filtro
+  check("R1 sessao so de troca: o formulario vai para a troca, so ficam as abas das duas trocas e os cards perdem o que leva a outro modo",
+    focused.modo === "swap" && focused.abas === "swap,face" && focused.botoes === "Baixar,Excluir" && focused.filtro
     && focused.guardado === '"swap"' && focused.video && focused.semPresets && focused.semModelo, JSON.stringify(focused));
   await page.click("#status");
   await page.waitForSelector("#gpu[open] #gpu-facts dd");
@@ -319,10 +321,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await shot("05b-so-troca");
   await page.click("#gpu [data-close]");
   await page.evaluate(() => { window.api = window.realApi; return refreshStatus(); });
-  const back = await page.evaluate(() => ({
-    abas: !document.querySelector('[data-key="mode"]').hidden, modo: state.mode,
+  const back = await page.evaluate(`({
+    abas: (${visibleTabs})() === "swap,face,t2v,i2v,flf,img", modo: state.mode,
     botoes: [...new Set([...document.querySelectorAll(".card-actions > *")].map((node) => node.textContent))].sort().join(),
-  }));
+  })`);
   check("R3 de volta a uma sessao inteira: as abas e as acoes dos cards voltam", back.abas && back.modo === "swap"
     && back.botoes === "Animar,Baixar,Continuar,Excluir,Reusar", JSON.stringify(back));
 
@@ -464,6 +466,36 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     && longPieces.map((piece) => piece.length).sort((a, b) => a - b).join() === "17,77,77"
     && longPieces.filter((piece) => "continue_motion" in piece).length === 2 && longPieces.every((piece) => piece.width === 640 && piece.height === 368),
     `${longMeta} | ${longWait} | ${graphsAfter[0].length - graphsBefore[0]} + ${graphsAfter[1].length - graphsBefore[1]} pedacos`);
+
+  // ---- U. trocar rosto numa foto: o rosto da primeira imagem na pessoa da segunda
+  await page.click('[data-key="mode"] [data-value="face"]');
+  const faceUi = await page.evaluate(() => ({
+    rosto: document.querySelector('[data-frame="start_image"] .drop-title').textContent,
+    pessoa: document.querySelector('[data-frame="end_image"] .drop-title').textContent,
+    semVideo: document.querySelector('[data-frame="video"]').hidden, cabelo: !document.querySelector("#face-options").hidden,
+    semPresets: document.querySelector("#presets-field").hidden, semProporcao: document.querySelector("#aspect-field").hidden,
+    botao: document.querySelector("#submit").textContent.trim(),
+  }));
+  check("U1 formulario da troca de rosto: a foto do rosto e a da pessoa, a opcao do cabelo, sem video, presets nem proporcao",
+    faceUi.rosto === "Rosto" && faceUi.pessoa === "Pessoa que recebe o rosto" && faceUi.semVideo && faceUi.cabelo && faceUi.semPresets
+    && faceUi.semProporcao && faceUi.botao === "Trocar rosto", JSON.stringify(faceUi));
+  await page.evaluate(() => { for (const name of Object.keys(files)) setFrame(name, null); });
+  await page.click("#submit");
+  check("U2 sem as duas fotos avisa", (await text("#error")).includes("foto do rosto"));
+  await page.setInputFiles('[data-frame="start_image"] input', `${TESTS}/start.png`);
+  await page.setInputFiles('[data-frame="end_image"] input', `${TESTS}/sample.png`);
+  const imagesBefore = await count(".card img");
+  await page.click("#submit");
+  await page.waitForFunction((n) => document.querySelectorAll(".card img").length === n + 1, imagesBefore, { timeout: 90000 });
+  const faceMeta = await text(".card-meta");
+  const faceGraph = [...(await graphsOf(8188)), ...(await graphsOf(8189))]
+    .filter((graph) => graph.some((item) => item.class_type === "ImageFromBatch")).pop() || [];
+  const headNode = faceGraph.find((item) => item.class_type === "WanStudioHeadWindow");
+  check("U3 troca de rosto: uma imagem do tamanho da foto da pessoa, so o rosto refeito (sempre, mesmo grande) e a imagem do meio do lote",
+    /Wan 2\.2 Animate · troca de rosto · 832×480 · seed \d+/.test(faceMeta) && (await text(".card-prompt")) === "Troca de rosto"
+    && headNode && headNode.inputs.region === "rosto" && headNode.inputs.always === true
+    && faceGraph.filter((item) => item.class_type === "LoadImage").length === 2, `${faceMeta} | ${JSON.stringify(headNode && headNode.inputs)}`);
+  await shot("06e-trocar-rosto");
 
   // ---- J. descoberta automatica: sem a conexao salva, acha a sessao pelo anuncio cifrado
   await page.evaluate(() => localStorage.removeItem("wan-conn"));

@@ -12,10 +12,9 @@ a GPU é emprestada, de um de dois lugares.
 
 O site é o mesmo nas duas, e acha sozinho a que estiver ligada.
 
-O Wan Studio também gera vídeo a partir de texto e de imagem (veja *Os outros modos*), mas
-desde 13/10/2026 **a sessão de costume só faz a troca de pessoa**: baixa 27 GB de modelos em
-vez de 83, deixa as duas GPUs do Kaggle para o vídeo e o site abre direto nela, sem as abas
-dos outros modos.
+O foco é a **troca de pessoa**: o site abre nela, ela é a primeira aba e os modelos dela são os
+primeiros a chegar na sessão. Ao lado ficam o **Trocar rosto** (o rosto de uma foto na pessoa de
+outra foto) e os outros modos do estúdio: imagem, texto → vídeo, imagem → vídeo.
 
 ```
  SITE (endereço fixo)                          GPU GRATUITA (só enquanto você usa)
@@ -61,7 +60,7 @@ Dois cliques em **Ligar GPU rápida** (nesta pasta). Na primeira vez ele:
    autorizar este computador (*Approve*);
 2. publica o Wan Studio na sua conta. O Modal monta a imagem (ComfyUI e PyTorch): uns 8 minutos,
    uma vez;
-3. baixa os modelos da troca de pessoa (36 GB) para um volume da sua conta: de 5 a 15 minutos,
+3. baixa os modelos da troca de pessoa e do 5B (uns 48 GB) para um volume da sua conta: de 5 a 15 minutos,
    uma vez, sem usar GPU nem a internet do seu computador;
 4. liga a máquina e abre o site já pareado.
 
@@ -77,7 +76,7 @@ python nuvem\ligar.py status        # ligada ou não, a placa e o crédito gasto
 python nuvem\ligar.py registro      # o que a máquina está fazendo
 python nuvem\ligar.py desligar      # desliga agora
 python nuvem\ligar.py --gpu L40S    # outra placa (L40S, A100, H100, H200, B200)
-python nuvem\ligar.py modelos --tudo   # baixa também os modelos do 5B e do 14B (mais 50 GB)
+python nuvem\ligar.py modelos --tudo   # baixa também os modelos do 14B (mais 38 GB)
 python nuvem\ligar.py publicar      # reenvia o código (o atalho já faz isso quando ele muda)
 ```
 
@@ -116,9 +115,9 @@ gasta crédito (o Modal dá 1 TiB de volume), nem baixar os vídeos.
 
 Dois cliques em **Ligar GPU** (nesta pasta). Ele envia o notebook ao Kaggle pela API oficial,
 que o executa em segundo plano, e abre o site já pareado. Em uns 5 minutos o indicador do
-site fica verde sozinho, e a troca de pessoa é liberada em mais 3 (tempos da sessão antiga, que
-baixava o 5B antes; a de hoje, só de troca, conectou em 3 minutos e meio e liberou a troca em 5
-numa sessão de CPU do Kaggle, e na de GPU ainda não foi cronometrada). Não é preciso abrir o
+site fica verde sozinho, e a troca de pessoa é liberada em mais uns 2 (numa sessão de CPU do
+Kaggle, com os mesmos downloads, ela conectou em 3 minutos e meio e liberou a troca em 5; os
+outros modos chegam depois dela). Não é preciso abrir o
 Kaggle nem deixar janela nenhuma aberta. Em horários cheios o Kaggle põe a sessão numa fila
 antes de ligar a máquina: num teste de manhã foram 35 minutos, de madrugada nenhum. O site
 conecta quando ela sair da fila.
@@ -220,24 +219,21 @@ custa de 30 a 45% menos onde existe.
 
 ## O que dá para fazer
 
-A sessão de costume faz uma coisa: **trocar a pessoa de um vídeo** (a seção logo abaixo), com
-a galeria, o *Comparar com o original* e a produção em massa.
+O principal é **trocar a pessoa de um vídeo** (a seção logo abaixo), com a galeria, o
+*Comparar com o original* e a produção em massa; e **trocar o rosto de uma foto** (logo depois).
 
-### Os outros modos
-
-Continuam no código e voltam, como abas no site, quando a sessão é ligada com os modelos deles:
-
-- no Kaggle: `python free\build.py --tudo` e **Ligar GPU** de novo (a sessão passa a baixar os
-  83 GB; `python free\build.py`, sem nada, volta à sessão só de troca);
-- na GPU rápida: `python nuvem\ligar.py modelos --tudo`.
+Para uma sessão só com a troca de pessoa (27 GB em vez de 83, as duas GPUs livres para o vídeo e
+o site só com as duas trocas): `python free\build.py --so-troca` e **Ligar GPU** de novo;
+`python free\build.py`, sem nada, volta à de costume.
 
 | Recurso | Como funciona |
 |---|---|
+| Trocar pessoa | Põe a pessoa de uma imagem no lugar da pessoa de um vídeo de até 60 s (Wan 2.2 Animate) |
+| Trocar rosto | Põe o rosto de uma foto na pessoa de outra foto, que fica com o corpo, a roupa, a expressão e o cenário dela |
 | Texto → Vídeo | Wan 2.2 5B (24 fps) ou 14B (16 fps), 3 ou 5 segundos, 480p ou 720p |
 | Imagem → Vídeo | Anima uma imagem enviada; a proporção acompanha a imagem |
 | Início + Fim | Gera a transição entre duas imagens (precisa do 14B) |
 | Imagem | Gera uma imagem parada, sempre com os 20 passos; o botão **Animar** a leva para Imagem → Vídeo |
-| Trocar pessoa | Põe a pessoa de uma imagem no lugar da pessoa de um vídeo de até 60 s (Wan 2.2 Animate) |
 | Continuar | Pega o último frame de um vídeo e começa o próximo a partir dele |
 | 36 movimentos de câmera | Dolly, crash zoom, órbita, grua, FPV, bullet time, dolly zoom, whip pan… |
 | 21 efeitos | Explosão, em chamas, desintegrar, levitação, congelar, raios, holograma… |
@@ -324,6 +320,27 @@ vezes mais rápido e bem pior: a pessoa saía com objetos inventados, o cabelo d
 original e a cor estourada. As medidas estão em *O que foi verificado*. Hoje a segunda GPU
 serve para um segundo vídeo na fila e para a restauração da alta definição.
 
+### Trocar o rosto de uma foto
+
+Na aba **Trocar rosto**, envie duas fotos: a do **rosto** e a da **pessoa que recebe o rosto**. O
+resultado é a segunda foto, do mesmo tamanho, com o rosto da primeira: o corpo, a roupa, o
+cabelo, a expressão e o cenário continuam os dela. Com **Levar o cabelo junto**, a cabeça
+inteira (rosto e cabelo) vem da primeira foto.
+
+Por dentro é o mesmo modelo da troca de pessoa (Wan 2.2 Animate, de licença que permite uso
+comercial), usado só na região do rosto: ela é recortada, ampliada até 768 px, refeita com o
+rosto da primeira foto como referência e posta de volta, e o resto da foto fica com os pixels
+originais. Os modelos mais conhecidos de troca de rosto (o inswapper, por exemplo) proíbem uso
+comercial. Funciona melhor com os dois rostos de frente e bem iluminados; sem rosto achado na
+segunda foto, o pedido volta com erro.
+
+> **Estado em 15/10/2026: nunca gerado numa GPU.** Numa sessão de CPU do Kaggle, com 1 passo,
+> ela rodou de ponta a ponta no ComfyUI de verdade e devolveu a foto no tamanho original
+> (640×640, em 16 minutos). A pessoa daquela foto estava de costas: é por isso que hoje uma foto
+> sem rosto à vista volta com erro. A qualidade da troca só a GPU mostra.
+
+Use apenas imagens de pessoas que autorizaram o uso.
+
 ### Produção em massa (para um perfil no Instagram, por exemplo)
 
 Para fazer muitos vídeos com a mesma pessoa sem um clique por vídeo:
@@ -357,19 +374,14 @@ galeria do navegador); eles aparecem só em `producao/prontos`.
 
 ### O que carrega e quando
 
-**Na sessão de costume (só a troca de pessoa)** são 27 GB. O site conecta assim que o ComfyUI
-e o codificador de texto (7 GB) estão no lugar; o Wan 2.2 Animate (GGUF Q4), com detecção,
-recorte, interpolação e restauração (20 GB), baixa em seguida, e o formulário avisa enquanto
-ele não chega. O melhorador de prompt não é baixado: a troca de pessoa não o usa, e a segunda
-GPU fica só para o vídeo.
-
-**Com `--tudo`** o estúdio abre assim que o **5B** está pronto (~19 GB). O resto baixa em
-segundo plano e aparece sozinho na interface; o diálogo da GPU mostra o que está baixando.
+O site conecta assim que o ComfyUI e o codificador de texto (7 GB) estão no lugar. O resto baixa
+em segundo plano, nesta ordem, e cada modo aparece sozinho quando o modelo dele chega; o
+diálogo da GPU mostra o que está baixando.
 
 | Ordem | Item | Tamanho | Libera |
 |---|---|---|---|
-| 1 | Wan 2.2 5B + turbo | 19 GB | Texto → Vídeo, Imagem → Vídeo, Imagem |
-| 2 | Wan 2.2 Animate (GGUF Q4) + detecção, recorte, interpolação e restauração | 19 GB | Trocar pessoa |
+| 1 | Wan 2.2 Animate (GGUF Q4) + detecção, recorte, interpolação e restauração | 20 GB | Trocar pessoa, Trocar rosto |
+| 2 | Wan 2.2 5B + turbo | 12 GB | Imagem, Texto → Vídeo, Imagem → Vídeo |
 | 3 | Melhorador de prompt | 8 GB | Melhorar com IA (só com 2 GPUs, como no Kaggle) |
 | 4 | Wan 2.2 14B imagem → vídeo (GGUF Q4) | 18 GB | Início + Fim e Imagem → Vídeo no 14B |
 | 5 | Wan 2.2 14B texto → vídeo (GGUF Q4) | 18 GB | Texto → Vídeo e Imagem no 14B |
@@ -452,7 +464,7 @@ no endereço hospedado, nem em outro aparelho. Baixe o que quiser levar.
 | Ligar GPU fica "na fila" por muito tempo | É a fila do Kaggle; pode fechar a janela, o site conecta quando liberar |
 | O site não conecta | Rode `python free\ligar.py status`; se estiver desligada, ligue de novo |
 | "faltou memória na GPU" | Na troca de pessoa, use a qualidade **Rápida**; nos outros modos, 480p, 3 segundos ou o modelo 5B |
-| O site só mostra a troca de pessoa | É a sessão de costume. Para os outros modos: `python free\build.py --tudo` e ligue a GPU de novo |
+| O site só mostra as trocas (de pessoa e de rosto) | É a sessão só de troca (`--so-troca`). Para os outros modos: `python free\build.py` e ligue a GPU de novo |
 | Ligar GPU rápida: "Payment method required" ou parecido | Cadastre o cartão e confira o limite em https://modal.com/settings/usage |
 | Ligar GPU rápida fica em "pedindo a máquina" | A placa está disputada no Modal: espere, ou ligue outra com `python nuvem\ligar.py --gpu L40S` |
 | Ligar GPU rápida: "A sessão parou ao ligar" | Rode `python nuvem\ligar.py registro` e me envie o que aparecer |
@@ -669,6 +681,7 @@ semana no Kaggle acabou no dia em que foi escrito, e a GPU rápida ainda não ti
 | `ref=crop` | Recorta a imagem da pessoa na caixa dela (pose + detector), na proporção do vídeo, antes de ela entrar no Animate. Hoje a imagem inteira entra com faixas pretas, e a pessoa fica pequena quando a proporção difere | `python tests\gpu_real.py juntos troca_vertical troca_vertical_crop` | o gorro e a roupa do personagem de corpo inteiro, que se perdiam com a imagem quadrada num vídeo em pé |
 | `box=larga`, `grow=16` | Caixa mais folgada em volta da pose e contorno mais engordado no recorte do SAM2 | `python tests\gpu_real.py juntos r_larga_rapida r_base_rapida` | se a trança da pessoa original ainda volta nos últimos segundos, e se o modelo inventou algo |
 | `unet=int8` | **O Animate em INT8** (o arquivo oficial da Comfy-Org, 17 GB) em vez do GGUF Q4. O ComfyUI fixado aqui (0.39) tem núcleos próprios para INT8, que só ligam com o PyTorch de CUDA 13; num relato com uma T4 e outro modelo, o INT8 rendeu 1,3 vez o fp8. Pela tabela de quem publicou o formato, a qualidade fica acima da do fp8 (e portanto do Q4) | gere o notebook com `python free\build.py --env TORCH_INDEX=cu130 --env ANIMATE_INT8=1`, ligue, e `python tests\gpu_real.py juntos i_q4 i_int8` | no registro (`log comfyui` e `log comfyui1`): o driver da placa (o CUDA 13 pede o 580 ou mais novo; com um mais antigo o instalador avisa e mantém o PyTorch da imagem, e aí o INT8 não rende), os segundos por passo de cada um e quanto do modelo ficou fora da placa (17 GB não cabem inteiros numa T4); e os quadros lado a lado |
+| Trocar rosto (modo novo, já no site) | **O rosto de uma foto na pessoa de outra foto** (veja *Trocar o rosto de uma foto*). Não tem padrão antigo a comparar: o teste é se o resultado presta | `python tests\gpu_real.py juntos r_foto r_foto_cabelo` | se o rosto se parece com o da foto de referência, se a expressão é a da segunda foto, se a borda em volta do rosto aparece e se o resto da imagem ficou igual |
 | `whole=true` | **A pessoa inteira.** O recorte do SAM2 é completado pelo de um modelo de recorte de primeiro plano (BiRefNet-portrait, licença MIT), só com os pedaços que saem da cabeça (cabelo, tranças, chapéu) e são pequenos perto da pessoa. No exemplo de 10 s da pasta `exemplos`, do meio para o fim, as tranças da pessoa original voltam grudadas na pessoa nova; rodado aqui nos quadros desse exemplo, o BiRefNet as pega em todos. Em fotos com várias pessoas ele junta quem está encostado e o que a pessoa segura (os bastões de um esquiador): por isso só entra o que sai da cabeça | gere o notebook com `python free\build.py --env PESSOA_INTEIRA=1`, ligue, e `python tests\gpu_real.py juntos w_base w_inteira` | se as tranças somem do meio para o fim (`quadros w_inteira 90 148`) e, no registro, quanto o recorte cresceu (`[wan_studio] pessoa inteira: ...`) |
 | `face=true` | **O rosto em detalhe.** Depois de gerar cada pedaço, uma segunda passada do Animate só na cabeça, ampliada até 3 vezes, com a cabeça da foto da pessoa como referência; o resultado volta para o lugar. Num plano aberto o rosto gerado em 480p tem de 60 a 90 px, e é aí que a semelhança com a foto se perde. Custa de 25 a 55% a mais de tempo quando roda; num close, com o rosto já grande, ela não roda | `python tests\gpu_real.py juntos f_base f_rosto` | se o rosto do `f_rosto` se parece mais com a foto, se a cabeça casa com o pescoço e o cabelo em volta, e o tempo de cada um |
 | `window=true` | **A janela na pessoa.** O Animate gera só o retângulo do quadro em que a pessoa está (com cenário em volta) e os quadros gerados voltam para o vídeo só onde o recorte dela manda; o resto do quadro fica com os pixels do vídeo de origem, em vez de passar pelo modelo. O passo custa mais que proporcionalmente aos pixels (na T4, 1,5 vez os pixels levou 1,9 vez o tempo): com a pessoa em metade do quadro, o pedaço sairia em bem menos da metade do tempo. Quando ela enche o quadro (mais de 85% dele), nada muda. A cor de cada pedaço é igualada à do anterior dentro do recorte | `python tests\gpu_real.py juntos j_base j_janela`, e `bateria j_vertical` para um vídeo em pé | no registro, o tamanho da janela (`[wan_studio] janela: ...`) e os segundos por passo; nos quadros, se dá para ver a borda da colagem em volta da pessoa, se ela saiu igual à do `j_base` e se a emenda entre os pedaços aparece (`python tests\gpu_real.py quadros j_janela 70 84`) |
@@ -717,27 +730,31 @@ do começo ao fim, não que o vídeo presta nem quanto tempo leva.
   duração, cada quadro vindo do pedaço certo (com e sem quadros interpolados), cor igualada,
   corte de cena; e as duas cadeias: o plano para qualquer duração, a mistura na emenda entre
   elas e a cor de uma trazida à da outra.
-- **Motor**: 46 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
+- **Motor**: 49 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
   fim (o padrão) e, por ajuste de teste, nas duas GPUs a partir do meio, em duas cadeias
-  (com e sem âncora), com a janela na pessoa, a pessoa inteira ou o rosto em detalhe; a sessão
-  só de troca avisando o site; vídeo longo,
+  (com e sem âncora), com a janela na pessoa, a pessoa inteira ou o rosto em detalhe; a troca
+  de rosto numa foto (com e sem o cabelo; sem a segunda foto, recusada dizendo qual falta); a
+  sessão só de troca avisando o site; vídeo longo,
   aquecimento, alta definição em fase separada, cancelamento no meio, falta de memória,
   melhorador cedendo a GPU; e, com uma placa de 45 GB simulada, a qualidade *Ultra* (recusada
   na T4; 720p direto, pedaços de 77 quadros e modelo fp8 na placa grande).
-- **Site e servidor**: 95 verificações num Chrome real contra um ComfyUI simulado: parear,
+- **Site e servidor**: 98 verificações num Chrome real contra um ComfyUI simulado: parear,
   conectar, gerar, trocar pessoa, fila, cancelar, erro, galeria persistente, Animar, Continuar,
   celular, desligar, e a *Ultra* aparecendo só na placa grande; o botão de ligar a GPU rápida
   (com a chave aceita e recusada), o tempo estimado em cada qualidade, a comparação com o
-  vídeo original; e a página só de troca de pessoa: é como o site abre na primeira visita
-  (sem abas, com os três passos na galeria vazia), as abas e os cartões dos outros modos
-  aparecem numa sessão que os ofereça e somem de novo numa só de troca.
-- **Recorte**: 57 verificações da parte dos nós do ComfyUI que é só conta: o fechamento do
+  vídeo original; a troca de rosto (o formulário das duas fotos, o aviso quando falta uma e
+  o grafo que refaz só o rosto); e a ordem das abas: na primeira visita o site abre na troca
+  de pessoa, a primeira aba, com os outros modos ao lado; numa sessão só de troca ficam só as
+  abas das duas trocas, e as outras voltam numa sessão inteira.
+- **Recorte**: 61 verificações da parte dos nós do ComfyUI que é só conta: o fechamento do
   recorte da pessoa (cortada pela borda, bolsões, corpo inteiro intacto, as duas pistas por
   quadro-chave), o recorte da imagem da pessoa na proporção do vídeo (`ref=crop`), a janela
   na pessoa (o tamanho dela em cada tipo de cena, a colagem de volta no vídeo, a cor trazida à
   do pedaço anterior, corte de cena), a pessoa inteira (a trança e o chapéu entram; o bastão
   na mão e o vizinho encostado não) e o rosto em detalhe (a janela da cabeça, a ampliação, a
-  segunda passada que nem roda quando o rosto já é grande). O SAM2, a detecção e o BiRefNet
+  segunda passada que nem roda quando o rosto já é grande) e a troca de rosto numa foto (o
+  recorte do rosto com a testa, a foto de costas recusada por não ter rosto à vista, a foto que
+  vira um vídeo parado e volta como imagem). O SAM2, a detecção e o BiRefNet
   em si só se conferem na GPU (o BiRefNet foi rodado aqui, na CPU, nos quadros do exemplo e em
   quatro fotos).
 - **O grafo padrão não mudou**: sem ajuste de teste nenhum, o grafo de cada pedaço da troca
@@ -784,9 +801,10 @@ do começo ao fim, não que o vídeo presta nem quanto tempo leva.
   site e deste arquivo para a H100 saem de um fator de 9 a 10 vezes sobre a T4.
 - **As duas cadeias**, a janela na pessoa, o Animate em INT8, o recorte da imagem da pessoa e
   a caixa larga: veja *Em teste*. No ComfyUI de verdade eles só rodaram em CPU, em 128 px.
-- **A sessão só de troca de pessoa numa GPU de verdade**: quanto ela leva para conectar e para
-  liberar a troca, agora que não baixa o 5B. Numa sessão de CPU do Kaggle (a mesma rede e os
-  mesmos downloads) ela subiu, avisou o site de que só faz a troca e a liberou em 5 minutos.
+- **A ordem nova dos downloads numa GPU de verdade**: quanto a sessão leva para conectar e
+  para liberar a troca, agora que o Animate baixa antes do 5B. Numa sessão de CPU do Kaggle (a
+  mesma rede e os mesmos downloads) a sessão só de troca subiu, avisou o site e liberou a troca
+  em 5 minutos.
 - **Tudo do Lightning AI numa conta de verdade**: o simulador segue o cliente oficial, mas o
   serviço pode responder diferente. Em especial: se a conta gratuita pode ligar a L40S, quanto
   disco ela guarda, se o comando remoto aceita o tamanho dos pedaços do pacote, se as chaves
@@ -825,8 +843,8 @@ exemplos/ resultados gerados na GPU gratuita
 Depois de alterar qualquer coisa em `app/`, `vm/` ou `free/launcher.py`:
 
 ```powershell
-python free\build.py        # regenera site/index.html e o notebook (sessão só de troca de pessoa)
-python free\build.py --tudo # o mesmo, com a sessão que baixa todos os modos
+python free\build.py        # regenera site/index.html e o notebook (todos os modos, a troca primeiro)
+python free\build.py --so-troca   # o mesmo, com a sessão que baixa só a troca de pessoa
 python tests\run_all.py     # opcional: roda os testes (veja os requisitos no próprio arquivo)
 ```
 

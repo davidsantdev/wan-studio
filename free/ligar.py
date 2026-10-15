@@ -38,8 +38,10 @@ ROOT = FREE.parent
 NOTEBOOK = FREE / "wan_studio_free.ipynb"
 CPU_NOTEBOOK = FREE / "wan_studio_cpu.ipynb"
 PAIRING = FREE / "pairing.json"
-TOKEN_FILE = FREE / "kaggle_token.txt"
-OPENER = FREE / "abrir.html"  # fora de site/: contem o segredo de pareamento
+# Os testes apontam os dois para uma pasta propria (WAN_TOKEN_FILE, WAN_OPENER_FILE): nunca mexem
+# nos de verdade.
+TOKEN_FILE = Path(os.environ.get("WAN_TOKEN_FILE") or FREE / "kaggle_token.txt")
+OPENER = Path(os.environ.get("WAN_OPENER_FILE") or FREE / "abrir.html")  # fora de site/: contem o segredo de pareamento
 SITE = ROOT / "site" / "index.html"
 ON = ("RUNNING", "QUEUED")
 TRANSIENT = (0, 429, 500, 502, 503, 504)  # 0: sem conexao; o resto, o Kaggle fora do ar por instantes
@@ -124,7 +126,8 @@ def ask_token(browser=True):
         user = username_of(token)
         if user:
             TOKEN_FILE.write_text(token + "\n", encoding="utf-8")
-            print(f"Token aceito e guardado em {TOKEN_FILE.relative_to(ROOT)}.\n")
+            shown = TOKEN_FILE.relative_to(ROOT) if ROOT in TOKEN_FILE.parents else TOKEN_FILE
+            print(f"Token aceito e guardado em {shown}.\n")
             return bearer(token), user
         print("O Kaggle não reconheceu esse token. Copie de novo, inteiro, e tente outra vez.\n")
 

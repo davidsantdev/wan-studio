@@ -153,6 +153,10 @@ TESTS = {
     "x_rosto": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
                  "expert": {"size": [384, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "face": True}},
                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    # Trocar rosto numa foto: o rosto da imagem de referencia na mulher do primeiro quadro do exemplo
+    # (a 256 px e um passo na CPU: so diz se o grafo roda e se o rosto volta para o lugar).
+    "x_foto": ({"mode": "face", "seed": 11, "expert": {"steps": 1, "onnx": "cpu", "max_size": 256}},
+               {"start_image": "pessoa.png", "end_image": "video_rosto.png"}),
     "x_cadeias": ({"mode": "swap", "duration": 4.0625, "quality": "rapida", "seed": 11,
                    "expert": {"size": [128, 128], "steps": 1, "chunk": 21, "onnx": "cpu", "chains": 2}},
                   {"start_image": "pessoa.png", "video": "video.mp4"}),
@@ -221,6 +225,15 @@ TESTS = {
                {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
     "f_rosto": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 12, "expert": {"worker": 1, "face": True}},
                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
+    # ---- Trocar rosto numa foto (15/10/2026; modo "face"). O rosto da foto (gerada por IA) em
+    # exemplos/ na mulher do exemplo oficial, num quadro em que ela esta de frente: so o rosto, e
+    # com o cabelo junto.
+    # O que olhar: se o rosto se parece com o da foto, se a expressao e a da mulher, se a borda em
+    # volta do rosto aparece e se o resto da imagem ficou igual (`juntos r_foto r_foto_cabelo`).
+    "r_foto": ({"mode": "face", "seed": 21, "expert": {"worker": 0}},
+               {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
+    "r_foto_cabelo": ({"mode": "face", "seed": 21, "hair": True, "expert": {"worker": 1}},
+                      {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
     # O caso de uso: a foto de uma pessoa num video em pe de 23 s, na qualidade boa, em duas cadeias.
     "c_humano": ({"mode": "swap", "duration": 23.5, "quality": "boa", "seed": 21, "expert": {"chains": 2}},
                  {"start_image": "retrato_vertical.png", "video": "vertical_30s.mp4"}),
@@ -456,8 +469,9 @@ def fixture(name):
         if not made.exists():
             raise SystemExit("rode antes o teste q_retrato (ele gera a pessoa)")
         path.write_bytes(made.read_bytes())
-    elif name in ("video_inicio.png", "video_fim.png"):
-        index = 0 if name == "video_inicio.png" else 48
+    elif name in ("video_inicio.png", "video_fim.png", "video_rosto.png"):
+        # (no quadro 0 a mulher do exemplo esta de costas; no 24, de frente, olhando para cima)
+        index = {"video_inicio.png": 0, "video_fim.png": 48, "video_rosto.png": 24}[name]
         ffmpeg("-i", fixture("video.mp4"), "-vf", f"select=eq(n\\,{index})", "-frames:v", "1", path)
     else:
         raise SystemExit(f"entrada desconhecida: {name}")

@@ -26,6 +26,8 @@ const SET_NAMES = {
   "5b": "5B", animate: "Animate · trocar pessoa", "14b_i2v": "14B · imagem → vídeo", "14b_t2v": "14B · texto → vídeo",
 };
 const MODEL_NAMES = { "5b": "5B", "14b": "14B", animate: "Animate" };
+// Os modos que usam o Animate: os unicos de uma sessao so de troca de pessoa.
+const ANIMATE_MODES = ["swap", "face"];
 const ENHANCER_TEXT = {
   ready: "pronto", waiting: "baixando o modelo", loading: "carregando", off: "indisponível", error: "falhou",
   sleeping: "em pausa enquanto a segunda GPU gera vídeo",
@@ -119,10 +121,10 @@ if (store.get("qualities", 1) < 2) {
   state.quality = DEFAULTS.quality;
   store.set("qualities", 2);
 }
-// O que a sessao da GPU oferece: "swap", so a troca de pessoa (a sessao de costume), ou "all",
-// o estudio inteiro (notebook gerado com --tudo). Fica guardado, para a pagina abrir do mesmo
+// O que a sessao da GPU oferece: "all", o estudio inteiro (a sessao de costume), ou "swap", so a
+// troca de pessoa (notebook gerado com --so-troca). Fica guardado, para a pagina abrir do mesmo
 // jeito com a GPU desligada.
-let focus = store.get("focus", "swap");
+let focus = store.get("focus", "all");
 const onlySwap = () => focus === "swap";
 const files = { start_image: null, end_image: null, video: null };
 let presets = { cameras: [], effects: [], styles: [] };
@@ -490,7 +492,7 @@ function nameOf(list, id) {
 }
 
 function neededSet(mode, model) {
-  if (mode === "swap") return "animate";
+  if (ANIMATE_MODES.includes(mode)) return "animate";
   if (model === "5b") return "5b";
   return mode === "t2v" || mode === "img" ? "14b_t2v" : "14b_i2v";
 }
@@ -509,7 +511,7 @@ let enhancing = false;
 function refreshEnhance() {
   const enhancer = online() ? status.enhancer : { state: "off" };
   // Na troca de pessoa o prompt e opcional e o video ja dita a cena.
-  const visible = state.mode !== "swap" && ["ready", "waiting", "loading", "sleeping"].includes(enhancer.state);
+  const visible = !ANIMATE_MODES.includes(state.mode) && ["ready", "waiting", "loading", "sleeping"].includes(enhancer.state);
   $("#enhance").hidden = !visible;
   $("#auto-row").hidden = !visible;
   if (!visible) return;
@@ -565,17 +567,17 @@ function gpuSpeed() {
 }
 
 function refreshForm() {
-  // Numa sessao so de troca de pessoa os outros modos nem aparecem.
-  $('[data-key="mode"]').hidden = onlySwap();
-  $("#focus-title").hidden = !onlySwap();
-  if (onlySwap() && state.mode !== "swap") choose("mode", "swap");
+  // Numa sessao so de troca de pessoa so as duas trocas aparecem.
+  for (const tab of $$('[data-key="mode"] button')) tab.hidden = onlySwap() && !ANIMATE_MODES.includes(tab.dataset.value);
+  if (onlySwap() && !ANIMATE_MODES.includes(state.mode)) choose("mode", "swap");
   const mode = state.mode;
   const image = mode === "img";
   const swap = mode === "swap";
+  const face = mode === "face";
   $("#form").classList.toggle("swap", swap);  // a ordem dos campos muda (style.css)
 
   let ready;
-  if (swap) {  // modelo fixo: o Animate
+  if (swap || face) {  // modelo fixo: o Animate
     ready = !online() || Boolean(status.models.animate && status.models.animate.ok);
   } else {
     const usable = ["5b", "14b"].filter((model) => modelOk(mode, model));
@@ -595,18 +597,20 @@ function refreshForm() {
   const info = online() ? status.models[neededSet(mode, state.model)] : null;
   // Imagem nao tem turbo: o servidor usa sempre os passos completos (veja workflows.resolve).
   // A troca de pessoa tem a propria escolha de qualidade, sempre com a LoRA de poucos passos.
-  $("#fast-row").hidden = image || swap || (Boolean(info) && !info.turbo);
+  $("#fast-row").hidden = image || swap || face || (Boolean(info) && !info.turbo);
   $("#fast-label").textContent = state.model === "5b"
     ? "Turbo: 3 passos em vez de 20, bem mais rápido (desmarque se o resultado sair estranho)"
     : "Turbo: 4 passos em vez de 20, bem mais rápido";
 
-  $("#frames").hidden = !(mode === "i2v" || mode === "flf" || swap);
-  $('[data-frame="end_image"]').hidden = mode !== "flf";
+  $("#frames").hidden = !(mode === "i2v" || mode === "flf" || swap || face);
+  $('[data-frame="end_image"]').hidden = !(mode === "flf" || face);
   $('[data-frame="video"]').hidden = !swap;
-  $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : "Frame inicial";
+  $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : face ? "Rosto" : "Frame inicial";
+  $('[data-frame="end_image"] .drop-title').textContent = face ? "Pessoa que recebe o rosto" : "Frame final";
   $("#swap-options").hidden = !swap;
   $("#swap-note").hidden = !swap;
-  $("#prompt").placeholder = swap
+  $("#face-options").hidden = !face;
+  $("#prompt").placeholder = swap || face
     ? "Opcional: descreva a pessoa ou a cena…"
     : "Descreva a cena: quem aparece, onde, o que acontece, a luz…";
 
@@ -636,14 +640,16 @@ function refreshForm() {
   } else {
     $("#swap-estimate").textContent = "";
   }
-  $("#duration-field").hidden = image;
+  $("#duration-field").hidden = image || face;
   $("#start-field").hidden = !swap;
   $("#count-field").hidden = swap;
-  $("#aspect-field").hidden = swap;
-  $("#presets-field").hidden = swap;
-  $("#swap-model").hidden = !swap;
-  $("#model-field").hidden = swap && onlySwap();  // um modelo so: nao ha o que mostrar
-  $('[data-key="model"]').hidden = swap;
+  $("#aspect-field").hidden = swap || face;  // na troca de rosto o tamanho e o da segunda foto
+  $("#resolution-field").hidden = swap || face;
+  $("#presets-field").hidden = swap || face;
+  $("#swap-model").hidden = !(swap || face);
+  $("#swap-model small").textContent = face ? "troca de rosto em foto" : "troca de pessoa · 16 fps";
+  $("#model-field").hidden = (swap || face) && onlySwap();  // um modelo so: nao ha o que mostrar
+  $('[data-key="model"]').hidden = swap || face;
 
   // Imagem parada nao tem movimento de camera.
   const tab = image && state.tab === "camera" ? "style" : state.tab;
@@ -663,6 +669,7 @@ function refreshForm() {
   if (online()) {
     const noun = image ? ["imagem", "imagens"] : ["vídeo", "vídeos"];
     if (swap) submit.textContent = submitting ? "Enviando o vídeo…" : "Trocar pessoa";
+    else if (face) submit.textContent = submitting ? "Enviando…" : count > 1 ? `Trocar rosto (${count} versões)` : "Trocar rosto";
     else submit.textContent = submitting ? "Enviando…" : count > 1 ? `Gerar ${count} ${noun[1]}` : `Gerar ${noun[0]}`;
     submit.disabled = submitting || !ready;
   } else if (status || (SITE && starting())) {
@@ -728,7 +735,7 @@ function setFrame(name, file) {
   }
   // A proporcao acompanha a imagem inicial (na troca de pessoa, quem manda e o video).
   preview.onload = name === "start_image"
-    ? () => { if (state.mode !== "swap") choose("aspect", nearestAspect(preview.naturalWidth, preview.naturalHeight)); }
+    ? () => { if (!ANIMATE_MODES.includes(state.mode)) choose("aspect", nearestAspect(preview.naturalWidth, preview.naturalHeight)); }
     : null;
   preview.dataset.url = URL.createObjectURL(file);
   preview.src = preview.dataset.url;
@@ -763,7 +770,7 @@ function bindFrames() {
     const file = [...event.clipboardData.files].find((entry) => entry.type.startsWith("image/"));
     if (!file) return;
     event.preventDefault();
-    setFrame(state.mode === "flf" && files.start_image ? "end_image" : "start_image", file);
+    setFrame((state.mode === "flf" || state.mode === "face") && files.start_image ? "end_image" : "start_image", file);
   });
 }
 
@@ -800,6 +807,10 @@ async function submit(event) {
     showError("Envie a imagem da pessoa e o vídeo.");
     return;
   }
+  if (state.mode === "face" && !(files.start_image && files.end_image)) {
+    showError("Envie a foto do rosto e a foto da pessoa que vai recebê-lo.");
+    return;
+  }
   if (swap && files.video.size > MAX_VIDEO_BYTES) {
     showError("O vídeo passa de 100 MB. Corte um trecho menor e envie de novo.");
     return;
@@ -816,8 +827,10 @@ async function submit(event) {
     replace: $("#replace").checked, start: Number($("#start").value) || 0,
     hd: !$("#hd-row").hidden && $("#hd").checked,
     fluid: !$("#fluid-row").hidden && $("#fluid").checked,
+    hair: state.mode === "face" && $("#hair").checked,
   };
-  const wanted = { i2v: ["start_image"], flf: ["start_image", "end_image"], swap: ["start_image", "video"] }[state.mode] || [];
+  const wanted = { i2v: ["start_image"], flf: ["start_image", "end_image"], swap: ["start_image", "video"],
+                   face: ["start_image", "end_image"] }[state.mode] || [];
   const inputs = {};
   const body = new FormData();
   body.append("params", JSON.stringify(params));
@@ -978,16 +991,17 @@ function waitText(item) {
 
 /** O que mostrar como titulo: o prompt, ou o nome do modo quando ele e opcional. */
 function titleOf(job) {
-  return job.prompt || (job.mode === "swap" ? "Troca de pessoa" : "");
+  return job.prompt || (job.mode === "swap" ? "Troca de pessoa" : job.mode === "face" ? "Troca de rosto" : "");
 }
 
 function describe(job) {
   const swap = job.mode === "swap";
-  const parts = [`Wan 2.2 ${MODEL_NAMES[job.model] || job.model}${job.fast && !swap ? " turbo" : ""}`];
+  const parts = [`Wan 2.2 ${MODEL_NAMES[job.model] || job.model}${job.fast && !swap && job.mode !== "face" ? " turbo" : ""}`];
   if (swap && job.quality) parts.push(`qualidade ${QUALITY_NAMES[job.quality] || job.quality}`);
   parts.push(`${job.width}×${job.height}`);
   if (job.kind !== "image") parts.push(`${job.duration} s`);
   if (job.mode === "swap") parts.push(job.replace === false ? "movimento copiado" : "pessoa trocada");
+  if (job.mode === "face") parts.splice(1, 0, job.hair ? "troca de rosto com o cabelo" : "troca de rosto");
   if (job.hd) parts.push(job.hd_method === "seedvr2" ? "alta definição" : "ampliado");
   if (job.fluid) parts.push(`${job.out_fps} fps`);
   if (job.cost) parts.push(`≈ US$ ${job.cost.toFixed(2)}`);  // tempo de maquina, na GPU paga por tempo
@@ -1015,6 +1029,7 @@ function reuse(item) {
   for (const key of ["mode", "camera", "effect", "style", "model", "aspect", "resolution"]) {
     if (item[key] !== undefined) state[key] = String(item[key]);
   }
+  if (item.mode === "face") $("#hair").checked = Boolean(item.hair);
   if (item.mode === "swap") {
     // A duracao gravada e a real do trecho; volta para a menor opcao que a cobre.
     state.length = String([5, 10, 15, 30, 60].find((option) => option >= item.duration - 0.5) || 60);
@@ -1124,7 +1139,7 @@ function actionsFor(item) {
     nodes.push(el("a", { href: item.url, download: `wan-${item.id}.${extension}`, textContent: "Baixar" }));
   }
   // Numa sessao so de troca de pessoa, o que levaria a outro modo nao aparece.
-  if (!onlySwap() || item.mode === "swap") nodes.push(actionButton("Reusar", () => reuse(item)));
+  if (!onlySwap() || ANIMATE_MODES.includes(item.mode)) nodes.push(actionButton("Reusar", () => reuse(item)));
   if (!onlySwap() && item.local && item.kind === "image") {
     nodes.push(actionButton("Animar", () => startFrom(item, async () => library.get(item.id).blob)));
   }

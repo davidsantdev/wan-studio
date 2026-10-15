@@ -93,15 +93,16 @@ def session_body():
 
 @app.function(image=image, volumes={MODELS_DIR: models}, timeout=6 * 3600, cpu=4, memory=2048)
 def baixar(everything: bool = False):
-    """Baixa os modelos para o volume: os da troca de pessoa (36 GB) ou, com `everything`,
-    tambem os do 5B e do 14B (mais 50 GB). O que ja esta la nao e baixado de novo."""
+    """Baixa os modelos para o volume: os da troca de pessoa e o 5B (imagem e video rapido),
+    uns 48 GB, ou, com `everything`, tambem os do 14B (mais 38 GB). O que ja esta la nao e
+    baixado de novo."""
     env = {**os.environ, "MODELS": "free", "PHASE": "models", "MODELS_DIR": MODELS_DIR,
            # Os pedacos de um download chegam fora de ordem: num disco local, e so depois o
            # arquivo pronto vai para o volume, que e feito para gravar de uma vez.
            "INCOMING": "/tmp/baixando", "NO_ROOM_CHECK": "1", "ANIMATE_KIND": "fp8", "ENHANCER": "off",
            "NO_VENV": "1", "PYTHON": sys.executable, "TROCA_PRIMEIRO": "1"}
     if not everything:
-        env["SO_TROCA"] = "1"
+        env["SKIP_14B"] = "1"
     code = subprocess.run(["bash", f"{REMOTE}/vm/setup.sh"], env=env).returncode
     models.commit()
     body = session_body()

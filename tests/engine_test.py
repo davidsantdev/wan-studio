@@ -314,6 +314,25 @@ def scenarios():
           str(done and (done["status"], done.get("error"))))
     call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
 
+    # ---- trocar rosto numa foto: o rosto da primeira imagem na pessoa da segunda
+    for hair, label in ((False, "G12j"), (True, "G12k")):
+        before = [len(graphs(base)) for base in FAKES]
+        code, reply = generate({"mode": "face", "seed": 4, "hair": hair}, start_image=person, end_image=WORK / "sample.png")
+        made = reply["jobs"][0] if code == 200 else {}
+        done = wait_job(made.get("id"))
+        fresh = [graph for base, start in zip(FAKES, before) for graph in graphs(base)[start:]]
+        head = (node(fresh[0], "WanStudioHeadWindow") or {}) if fresh else {}
+        check(f"{label} troca de rosto {'com' if hair else 'sem'} o cabelo: uma imagem do tamanho da foto da pessoa, "
+              f"refazendo {'a cabeca' if hair else 'so o rosto'}",
+              code == 200 and bool(done) and done["status"] == "done" and done["kind"] == "image"
+              and (done.get("width"), done.get("height")) == (416, 240) and len(fresh) == 1
+              and head.get("region") == ("cabeca" if hair else "rosto") and head.get("always") is True,
+              str((code, done and (done["status"], done.get("error"), done.get("width")), head.get("region"))))
+        call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+    code, reply = generate({"mode": "face", "seed": 4}, start_image=person)
+    check("G12l troca de rosto sem a segunda foto: recusada, dizendo o que falta", code == 400 and "receber o rosto" in str(reply),
+          str(reply)[:80])
+
     # ---- a janela na pessoa (ajuste de teste), nas duas cadeias: cada pedaco gera so o retangulo
     # em que a pessoa esta e o cola de volta no video; a cor so e igualada a de um vizinho no tempo
     before = [len(graphs(base)) for base in FAKES]
