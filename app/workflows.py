@@ -67,6 +67,21 @@ CATALOG = {
                   "WanStudioWindow", "WanStudioPaste", "WanStudioWholePerson", "WanStudioHeadWindow",
                   "WanStudioFacePaste"),
     },
+    # FLUX.2 Klein 9B + a LoRA de troca de cabeca BFS: troca o rosto de uma foto (modo "face").
+    "klein": {
+        "unet": ("flux-2-klein-9b-Q8_0.gguf", "flux-2-klein-9b-fp8.safetensors", "flux-2-klein-9b.safetensors"),
+        "vae": "flux2-vae.safetensors",
+        "turbo": {},  # o Klein 9B ja e o de poucos passos
+        "extra": {
+            "klein_clip": ("clip", "qwen_3_8b_fp8mixed.safetensors"),
+            "head_lora": ("lora", "bfs_head_v1_flux-klein_9b_step3750_rank64.safetensors"),
+            "vitpose": ("detection", "vitpose-l-wholebody.onnx"),
+            "yolo": ("detection", "yolov10m.onnx"),
+        },
+        "nodes": ("PoseAndFaceDetection", "ReferenceLatent", "EmptyFlux2LatentImage", "Flux2Scheduler",
+                  "CFGGuider", "KSamplerSelect", "RandomNoise", "SamplerCustomAdvanced",
+                  "WanStudioHeadCrop", "WanStudioHeadPaste"),
+    },
 }
 
 # O 5B trabalha em multiplos de 32 e 24 fps; o 14B em multiplos de 16 e 16 fps.
@@ -195,6 +210,8 @@ SWAP_FACE = False
 
 def required_set(model, mode):
     """Qual conjunto de arquivos (chave de CATALOG) o job precisa."""
+    if mode == "face" and model == "klein":
+        return "klein"
     if mode in ("swap", "face"):
         return "animate"
     if model == "5b":
@@ -442,11 +459,37 @@ def _resolve_swap(params, has_person, has_video):
 
 
 # Trocar rosto numa foto (modo "face"): o rosto da primeira imagem entra na pessoa da segunda,
-# que fica com o corpo, a roupa, o cabelo (a menos que `hair`), a expressao e o cenario dela. E a
-# segunda passada do rosto em detalhe feita sobre uma foto: o Animate refaz so o rosto, ampliado
-# ate FACE_IMAGE_SIZE, com o rosto da primeira imagem como referencia, e o resto da foto fica
-# com os pixels dela. A foto vira um video parado de FACE_FRAMES quadros (o Animate gera video)
-# e sai o do meio.
+# que fica com o corpo, a roupa, a pose, a expressao e o cenario dela; com `hair` (o padrao), a
+# cabeca inteira vem da primeira, com o cabelo.
+#
+# Quem refaz e o FLUX.2 Klein 9B, um modelo de edicao de imagem, com a LoRA de troca de cabeca
+# BFS (KLEIN_PROMPT e o texto que ela pede): a cabeca da segunda foto e recortada com folga,
+# refeita em uns KLEIN_SIZE x KLEIN_SIZE pixels com as duas fotos como referencia e posta de
+# volta, e o resto da foto fica com os pixels dela (vm/nodes/wan_studio, WanStudioHeadCrop).
+#
+# A primeira versao usava o Animate, que e um modelo de video, refazendo so o rosto (a segunda
+# passada do rosto em detalhe sobre a foto, que vira um video parado de FACE_FRAMES quadros):
+# no primeiro teste numa GPU, em 15/10/2026, o usuario achou o resultado muito ruim. Ela ficou
+# como ajuste de teste (expert engine=animate), para comparar.
+KLEIN_SIZE = 1024
+KLEIN_SOURCE_SPAN = 4.0  # a foto do rosto e recortada mais justa que a da pessoa: so a cabeca importa
+KLEIN_STEPS = 4
+KLEIN_SAMPLER = "lcm"  # o do fluxo de trabalho da propria LoRA
+KLEIN_PROMPT = (
+    "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. "
+    "remove the head from Picture 1 completely and replace it with the head from Picture 2, strictly preserving "
+    "the hair, eye color, and nose structure of Picture 2. copy the direction of the eye, head rotation, and "
+    "micro-expressions from Picture 1. Keep the body, clothing, pose, framing, and background intact. "
+    "high quality, sharp details.")
+# Sem o cabelo: o mesmo pedido, ficando o penteado da foto da pessoa (e so o rosto e colado de volta).
+KLEIN_PROMPT_FACE = (
+    "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, background, and hair. "
+    "replace the face of Picture 1 with the face from Picture 2, strictly preserving the eye color, nose structure, "
+    "and facial features of Picture 2, but keep the hairstyle and hair color of Picture 1. copy the direction of "
+    "the eye, head rotation, and micro-expressions from Picture 1. Keep the body, clothing, pose, framing, and "
+    "background intact. high quality, sharp details.")
+KLEIN_NEGATIVE = ("bad quality, noise, blurry, worst quality, low resolution, blur, distortion, unnatural blending, "
+                  "cartoon, illustration, painting")
 FACE_IMAGE_SIZE = 768
 FACE_FRAMES = 5
 
@@ -460,26 +503,42 @@ def _resolve_face(params, has_face, has_body):
     bad = "ajuste de teste inválido"
     if expert.get("onnx", "gpu") not in ("cpu", "gpu"):
         raise ValueError(bad)
-    return {
+    engine = expert.get("engine", "klein")
+    if engine not in ("klein", "animate"):
+        raise ValueError(bad)
+    common = {
         "mode": "face",
         "kind": "image",
-        "model": "animate",
-        "fast": True,
-        "steps": _number(expert, "steps", 4, 1, 30, bad, int),
         # O cabelo vem junto do rosto (a cabeca inteira), em vez de ficar o da segunda imagem.
-        "hair": bool(params.get("hair", False)),
+        "hair": bool(params.get("hair", True)),
         "onnx": expert.get("onnx", "gpu"),
-        "max_size": _number(expert, "max_size", FACE_IMAGE_SIZE, 256, 1024, bad, int),
         "pin": _number(expert, "worker", None, 0, 16, bad, int),
-        "replace": True,
-        "length": FACE_FRAMES,
-        "overlap": SWAP_OVERLAP,
-        "fps": SWAP_FPS,
         # O tamanho e o da segunda imagem: o servidor o le dela (e confere no resultado).
         "width": 0,
         "height": 0,
         "duration": 0,
         "seed": _seed(params),
+    }
+    if engine == "klein":
+        sampler = expert.get("sampler", KLEIN_SAMPLER)
+        if sampler not in ("lcm", "euler"):
+            raise ValueError(bad)
+        return {**common, "model": "klein", "fast": True, "sampler": sampler,
+                "steps": _number(expert, "steps", KLEIN_STEPS, 1, 30, bad, int),
+                "cfg": _number(expert, "cfg", 1.0, 1.0, 8.0, bad, float),
+                "lora": _number(expert, "lora", 1.0, 0.0, 1.5, bad, float),
+                "size": _number(expert, "size", KLEIN_SIZE, 512, 1536, bad, int),
+                "length": 1, "fps": 1}
+    return {
+        **common,
+        "model": "animate",
+        "fast": True,
+        "steps": _number(expert, "steps", 4, 1, 30, bad, int),
+        "max_size": _number(expert, "max_size", FACE_IMAGE_SIZE, 256, 1024, bad, int),
+        "replace": True,
+        "length": FACE_FRAMES,
+        "overlap": SWAP_OVERLAP,
+        "fps": SWAP_FPS,
     }
 
 
@@ -571,6 +630,8 @@ def build(spec, files, positive, negative, prefix, start_image=None, end_image=N
     """
     if spec["mode"] == "swap":
         return _build_animate(spec, files, positive, negative, prefix, start_image, video, motion)
+    if spec["mode"] == "face" and spec["model"] == "klein":
+        return _build_face_klein(spec, files, prefix, start_image, end_image)
     if spec["mode"] == "face":
         return _build_face_image(spec, files, positive, negative, prefix, start_image, end_image)
     builder = _build_5b if spec["model"] == "5b" else _build_14b
@@ -823,6 +884,52 @@ def _build_face_image(spec, files, positive, negative, prefix, face_image, body_
     single = g.add("ImageFromBatch", image=[images, 0], batch_index=spec["length"] // 2, length=1)
     save = g.add("SaveImage", images=[single, 0], filename_prefix=f"wanstudio/{prefix}")
     g.stage("finalizando", single, save)
+    return g.nodes, [sampler], g.stages
+
+
+def _build_face_klein(spec, files, prefix, face_image, body_image):
+    """Trocar rosto numa foto com o FLUX.2 Klein (veja KLEIN_PROMPT): a cabeca da foto da pessoa,
+    recortada com folga, e refeita com as duas fotos como referencia (a da pessoa primeiro, como a
+    LoRA pede) e volta para o lugar. Devolve (grafo, samplers, etapas), como `build`."""
+    g = _Graph()
+    body = g.add("LoadImage", image=body_image)
+    face = g.add("LoadImage", image=face_image)
+    detector = _detector(g, files, spec["onnx"])
+    model = _load_unet(g, files["unet"])
+    if spec["lora"] > 0:
+        model = g.add("LoraLoaderModelOnly", model=[model, 0], lora_name=files["head_lora"],
+                      strength_model=spec["lora"])
+    clip = g.add("CLIPLoader", clip_name=files["klein_clip"], type="flux2", device="default")
+    vae = g.add("VAELoader", vae_name=files["vae"])
+    g.stage_since("carregando o modelo", 0)
+    body_pose = g.add("PoseAndFaceDetection", model=[detector, 0], images=[body, 0], width=1024, height=1024)
+    face_pose = g.add("PoseAndFaceDetection", model=[detector, 0], images=[face, 0], width=1024, height=1024)
+    target = g.add("WanStudioHeadCrop", image=[body, 0], pose_data=[body_pose, 0], size=spec["size"], photo="pessoa")
+    source = g.add("WanStudioHeadCrop", image=[face, 0], pose_data=[face_pose, 0], span=KLEIN_SOURCE_SPAN,
+                   size=spec["size"], photo="rosto")
+    g.stage("analisando as fotos", body_pose, face_pose, target, source)
+    start = len(g.nodes)
+    positive = g.add("CLIPTextEncode", text=KLEIN_PROMPT if spec["hair"] else KLEIN_PROMPT_FACE, clip=[clip, 0])
+    negative = g.add("CLIPTextEncode", text=KLEIN_NEGATIVE, clip=[clip, 0])
+    for picture in (target, source):  # Picture 1 e a foto da pessoa; Picture 2, a do rosto
+        latent = g.add("VAEEncode", pixels=[picture, 0], vae=[vae, 0])
+        positive = g.add("ReferenceLatent", conditioning=[positive, 0], latent=[latent, 0])
+        negative = g.add("ReferenceLatent", conditioning=[negative, 0], latent=[latent, 0])
+    width, height = [target, 5], [target, 6]
+    empty = g.add("EmptyFlux2LatentImage", width=width, height=height, batch_size=1)
+    sigmas = g.add("Flux2Scheduler", steps=spec["steps"], width=width, height=height)
+    guider = g.add("CFGGuider", model=[model, 0], positive=[positive, 0], negative=[negative, 0], cfg=spec["cfg"])
+    chosen = g.add("KSamplerSelect", sampler_name=spec["sampler"])
+    noise = g.add("RandomNoise", noise_seed=spec["seed"])
+    sampler = g.add("SamplerCustomAdvanced", noise=[noise, 0], guider=[guider, 0], sampler=[chosen, 0],
+                    sigmas=[sigmas, 0], latent_image=[empty, 0])
+    g.stage_since("refazendo o rosto", start)
+    decoded = g.add("VAEDecode", samples=[sampler, 0], vae=[vae, 0])
+    pasted = g.add("WanStudioHeadPaste", images=[body, 0], patch=[decoded, 0], x=[target, 1], y=[target, 2],
+                   width=[target, 3], height=[target, 4], pose_data=[body_pose, 0],
+                   region="cabeca" if spec["hair"] else "rosto")
+    save = g.add("SaveImage", images=[pasted, 0], filename_prefix=f"wanstudio/{prefix}")
+    g.stage("finalizando", decoded, pasted, save)
     return g.nodes, [sampler], g.stages
 
 

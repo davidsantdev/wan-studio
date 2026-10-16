@@ -474,11 +474,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     pessoa: document.querySelector('[data-frame="end_image"] .drop-title').textContent,
     semVideo: document.querySelector('[data-frame="video"]').hidden, cabelo: !document.querySelector("#face-options").hidden,
     semPresets: document.querySelector("#presets-field").hidden, semProporcao: document.querySelector("#aspect-field").hidden,
-    botao: document.querySelector("#submit").textContent.trim(),
+    botao: document.querySelector("#submit").textContent.trim(), cabeloMarcado: document.querySelector("#hair").checked,
+    modelo: document.querySelector("#swap-model span").textContent, semPrompt: document.querySelector("#prompt-field").hidden,
   }));
-  check("U1 formulario da troca de rosto: a foto do rosto e a da pessoa, a opcao do cabelo, sem video, presets nem proporcao",
+  check("U1 formulario da troca de rosto: a foto do rosto e a da pessoa, a opcao do cabelo (marcada), o FLUX.2 Klein, sem video, prompt, presets nem proporcao",
     faceUi.rosto === "Rosto" && faceUi.pessoa === "Pessoa que recebe o rosto" && faceUi.semVideo && faceUi.cabelo && faceUi.semPresets
-    && faceUi.semProporcao && faceUi.botao === "Trocar rosto", JSON.stringify(faceUi));
+    && faceUi.semProporcao && faceUi.botao === "Trocar rosto" && faceUi.cabeloMarcado && faceUi.modelo === "FLUX.2 Klein"
+    && faceUi.semPrompt, JSON.stringify(faceUi));
+  check("U1b sem o Klein (o Animate ja esta instalado): a troca de rosto avisa e trava o botao",
+    await page.isVisible("#mode-note") && await page.isDisabled("#submit"), await text("#mode-note"));
+  await fetch("http://127.0.0.1:8188/_install", { method: "POST", body: JSON.stringify({ set: "klein" }) });
+  await page.waitForFunction(() => document.querySelector("#mode-note").hidden, null, { timeout: 40000 });
   await page.evaluate(() => { for (const name of Object.keys(files)) setFrame(name, null); });
   await page.click("#submit");
   check("U2 sem as duas fotos avisa", (await text("#error")).includes("foto do rosto"));
@@ -489,12 +495,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   await page.waitForFunction((n) => document.querySelectorAll(".card img").length === n + 1, imagesBefore, { timeout: 90000 });
   const faceMeta = await text(".card-meta");
   const faceGraph = [...(await graphsOf(8188)), ...(await graphsOf(8189))]
-    .filter((graph) => graph.some((item) => item.class_type === "ImageFromBatch")).pop() || [];
-  const headNode = faceGraph.find((item) => item.class_type === "WanStudioHeadWindow");
-  check("U3 troca de rosto: uma imagem do tamanho da foto da pessoa, so o rosto refeito (sempre, mesmo grande) e a imagem do meio do lote",
-    /Wan 2\.2 Animate · troca de rosto · 832×480 · seed \d+/.test(faceMeta) && (await text(".card-prompt")) === "Troca de rosto"
-    && headNode && headNode.inputs.region === "rosto" && headNode.inputs.always === true
-    && faceGraph.filter((item) => item.class_type === "LoadImage").length === 2, `${faceMeta} | ${JSON.stringify(headNode && headNode.inputs)}`);
+    .filter((graph) => graph.some((item) => item.class_type === "WanStudioHeadPaste")).pop() || [];
+  const pasteNode = faceGraph.find((item) => item.class_type === "WanStudioHeadPaste");
+  check("U3 troca de rosto pelo FLUX.2 Klein: uma imagem do tamanho da foto da pessoa, com a cabeca inteira colada de volta",
+    /FLUX\.2 Klein · troca de rosto com o cabelo · 832×480 · seed \d+/.test(faceMeta) && (await text(".card-prompt")) === "Troca de rosto"
+    && pasteNode && pasteNode.inputs.region === "cabeca" && faceGraph.some((item) => item.class_type === "SamplerCustomAdvanced")
+    && faceGraph.filter((item) => item.class_type === "LoadImage").length === 2, `${faceMeta} | ${JSON.stringify(pasteNode && pasteNode.inputs)}`);
   await shot("06e-trocar-rosto");
 
   // ---- J. descoberta automatica: sem a conexao salva, acha a sessao pelo anuncio cifrado

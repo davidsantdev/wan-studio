@@ -321,14 +321,27 @@ def scenarios():
         made = reply["jobs"][0] if code == 200 else {}
         done = wait_job(made.get("id"))
         fresh = [graph for base, start in zip(FAKES, before) for graph in graphs(base)[start:]]
-        head = (node(fresh[0], "WanStudioHeadWindow") or {}) if fresh else {}
-        check(f"{label} troca de rosto {'com' if hair else 'sem'} o cabelo: uma imagem do tamanho da foto da pessoa, "
-              f"refazendo {'a cabeca' if hair else 'so o rosto'}",
+        paste = (node(fresh[0], "WanStudioHeadPaste") or {}) if fresh else {}
+        check(f"{label} troca de rosto {'com' if hair else 'sem'} o cabelo (FLUX.2 Klein): uma imagem do tamanho da foto "
+              f"da pessoa, colando de volta {'a cabeca' if hair else 'so o rosto'}",
               code == 200 and bool(done) and done["status"] == "done" and done["kind"] == "image"
-              and (done.get("width"), done.get("height")) == (416, 240) and len(fresh) == 1
-              and head.get("region") == ("cabeca" if hair else "rosto") and head.get("always") is True,
-              str((code, done and (done["status"], done.get("error"), done.get("width")), head.get("region"))))
+              and done["model"] == "klein" and (done.get("width"), done.get("height")) == (416, 240) and len(fresh) == 1
+              and paste.get("region") == ("cabeca" if hair else "rosto") and node(fresh[0], "SamplerCustomAdvanced") is not None
+              and node(fresh[0], "WanAnimateToVideo") is None,
+              str((code, done and (done["status"], done.get("error"), done.get("width")), paste.get("region"))))
         call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+    before = [len(graphs(base)) for base in FAKES]
+    code, reply = generate({"mode": "face", "seed": 4, "hair": False, "expert": {"engine": "animate"}},
+                           start_image=person, end_image=WORK / "sample.png")
+    made = reply["jobs"][0] if code == 200 else {}
+    done = wait_job(made.get("id"))
+    fresh = [graph for base, start in zip(FAKES, before) for graph in graphs(base)[start:]]
+    head = (node(fresh[0], "WanStudioHeadWindow") or {}) if fresh else {}
+    check("G12m a troca de rosto antiga (Animate) continua como ajuste de teste, para comparar",
+          code == 200 and bool(done) and done["status"] == "done" and done["model"] == "animate"
+          and head.get("region") == "rosto" and head.get("always") is True,
+          str((code, done and (done["status"], done.get("error")), head.get("region"))))
+    call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
     code, reply = generate({"mode": "face", "seed": 4}, start_image=person)
     check("G12l troca de rosto sem a segunda foto: recusada, dizendo o que falta", code == 400 and "receber o rosto" in str(reply),
           str(reply)[:80])
@@ -639,7 +652,7 @@ def main():
                f"sine=frequency=330:duration={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", WORK / name)
     shared = WORK / "conjuntos.txt"
     procs = [spawn("fake_comfy.py", f"fake{index}.log", "--port", base.rsplit(":", 1)[1], FAKE_ASSETS=str(WORK),
-                   FAKE_SETS="animate,14b_t2v,14b_i2v", FAKE_STEP="0.15", FAKE_SHARED=str(shared))
+                   FAKE_SETS="animate,klein,14b_t2v,14b_i2v", FAKE_STEP="0.15", FAKE_SHARED=str(shared))
              for index, base in enumerate(FAKES)]
     procs.append(spawn("run_server_enhancer.py", "server.log", PORT="8093", COMFY_URLS=",".join(FAKES),
                        ENHANCER_WORKER="1", ENHANCER_RETURN_AFTER="2", WAN_MANAGED="1",

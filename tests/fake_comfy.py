@@ -46,7 +46,10 @@ INSTALLED = {
 # o que chega depois sao os arquivos de modelo.
 EXTRA_NODES = {"WanAnimateToVideo", "PoseAndFaceDetection", "DrawViTPose", "DownloadAndLoadSAM2Model",
                "WanStudioPersonMask", "WanStudioFitReference", "WanStudioWindow", "WanStudioPaste",
-               "WanStudioWholePerson", "WanStudioHeadWindow", "WanStudioFacePaste", "RepeatImageBatch", "ImageFromBatch"}
+               "WanStudioWholePerson", "WanStudioHeadWindow", "WanStudioFacePaste", "RepeatImageBatch", "ImageFromBatch",
+               # a troca de rosto numa foto (FLUX.2 Klein): os nos do ComfyUI e os do Wan Studio
+               "ReferenceLatent", "EmptyFlux2LatentImage", "Flux2Scheduler", "CFGGuider", "KSamplerSelect",
+               "RandomNoise", "SamplerCustomAdvanced", "WanStudioHeadCrop", "WanStudioHeadPaste"}
 # Quanto cada no "demora", para o teste enxergar as etapas.
 SLOW_NODES = {"PoseAndFaceDetection": 2.5, "WanStudioPersonMask": 2.5}
 uploaded = {}  # nome -> conteudo dos arquivos enviados
@@ -62,6 +65,14 @@ EXTRA_SETS = {
         "UpscaleModelLoader": ["RealESRGAN_x2plus.pth"],
         "FrameInterpolationModelLoader": ["rife_v4.25.safetensors"],
         "WanStudioForegroundLoader": ["BiRefNet-portrait"],
+    },
+    # A troca de rosto numa foto: o Klein, o codificador de texto dele, o VAE, a LoRA e a deteccao.
+    "klein": {
+        "UnetLoaderGGUF": ["flux-2-klein-9b-Q8_0.gguf"],
+        "CLIPLoader": ["qwen_3_8b_fp8mixed.safetensors"],
+        "VAELoader": ["flux2-vae.safetensors"],
+        "LoraLoaderModelOnly": ["bfs_head_v1_flux-klein_9b_step3750_rank64.safetensors"],
+        "OnnxDetectionModelLoader": ["vitpose-l-wholebody.onnx", "yolov10m.onnx"],
     },
     # O mesmo modelo sem compressao GGUF: o que o instalador baixa numa placa de 24 GB ou mais.
     "animate_fp8": {"UNETLoader": ["Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors"]},
@@ -100,8 +111,10 @@ pending, running, history, sockets, graphs = [], {}, {}, {}, {}
 state = {"interrupt": None}
 
 
-def sampler_steps(node):
+def sampler_steps(node, graph=None):
     inputs = node["inputs"]
+    if node["class_type"] == "SamplerCustomAdvanced":  # os passos estao no no das sigmas
+        return (graph or {}).get(str(inputs["sigmas"][0]), {}).get("inputs", {}).get("steps", 3)
     if node["class_type"] == "KSampler":
         return inputs["steps"]
     if node["class_type"] == "KSamplerAdvanced":
@@ -140,7 +153,7 @@ async def execute(pid, graph, client_id):
         await asyncio.sleep(SLOW_NODES.get(node["class_type"], 0))
         if state["interrupt"] == pid:  # como no ComfyUI: a interrupcao vale entre um no e outro
             return interrupted
-        steps = sampler_steps(node)
+        steps = sampler_steps(node, graph)
         for step in range(1, steps + 1):
             await asyncio.sleep(STEP)
             if state["interrupt"] == pid:

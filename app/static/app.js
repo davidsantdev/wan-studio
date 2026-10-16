@@ -23,10 +23,11 @@ const DEFAULTS = {
   quality: "boa", length: "5",  // troca de pessoa: qualidade e duracao do trecho
 };
 const SET_NAMES = {
-  "5b": "5B", animate: "Animate · trocar pessoa", "14b_i2v": "14B · imagem → vídeo", "14b_t2v": "14B · texto → vídeo",
+  "5b": "Wan 2.2 5B", animate: "Wan 2.2 Animate · trocar pessoa", klein: "FLUX.2 Klein · trocar rosto",
+  "14b_i2v": "Wan 2.2 14B · imagem → vídeo", "14b_t2v": "Wan 2.2 14B · texto → vídeo",
 };
-const MODEL_NAMES = { "5b": "5B", "14b": "14B", animate: "Animate" };
-// Os modos que usam o Animate: os unicos de uma sessao so de troca de pessoa.
+const MODEL_NAMES = { "5b": "Wan 2.2 5B", "14b": "Wan 2.2 14B", animate: "Wan 2.2 Animate", klein: "FLUX.2 Klein" };
+// As trocas (de pessoa e de rosto): os unicos modos de uma sessao so de troca.
 const ANIMATE_MODES = ["swap", "face"];
 const ENHANCER_TEXT = {
   ready: "pronto", waiting: "baixando o modelo", loading: "carregando", off: "indisponível", error: "falhou",
@@ -351,6 +352,8 @@ function renderGpu() {
   if (onlySwap()) {  // so o que a troca de pessoa usa
     const swap = status.models.animate || {};
     rows.push(...fact("Troca de pessoa", swap.ok ? "pronta" : status.extras ? "baixando" : "não instalada", swap.ok ? "yes" : "no"));
+    const face = status.models.klein || {};
+    rows.push(...fact("Troca de rosto", face.ok ? "pronta" : status.extras ? "baixando" : "não instalada", face.ok ? "yes" : "no"));
     rows.push(...fact("Alta definição", swap.hd === "seedvr2" ? "restauração dos detalhes" : swap.hd ? "ampliação" : "indisponível",
                       swap.hd ? "yes" : "no"));
     rows.push(...fact("Movimento fluido", swap.rife ? "pronto" : "indisponível", swap.rife ? "yes" : "no"));
@@ -358,7 +361,7 @@ function renderGpu() {
     for (const [name, label] of Object.entries(SET_NAMES)) {
       const info = status.models[name];
       const ok = Boolean(info && info.ok);
-      rows.push(...fact(`Wan 2.2 ${label}`, ok ? (info.turbo ? "instalado · turbo" : "instalado") : "não instalado",
+      rows.push(...fact(label, ok ? (info.turbo && name !== "klein" ? "instalado · turbo" : "instalado") : "não instalado",
                         ok ? "yes" : "no"));
     }
     const enhancer = status.enhancer;
@@ -492,7 +495,8 @@ function nameOf(list, id) {
 }
 
 function neededSet(mode, model) {
-  if (ANIMATE_MODES.includes(mode)) return "animate";
+  if (mode === "face") return "klein";
+  if (mode === "swap") return "animate";
   if (model === "5b") return "5b";
   return mode === "t2v" || mode === "img" ? "14b_t2v" : "14b_i2v";
 }
@@ -577,8 +581,9 @@ function refreshForm() {
   $("#form").classList.toggle("swap", swap);  // a ordem dos campos muda (style.css)
 
   let ready;
-  if (swap || face) {  // modelo fixo: o Animate
-    ready = !online() || Boolean(status.models.animate && status.models.animate.ok);
+  if (swap || face) {  // modelo fixo: o Animate na troca de pessoa, o Klein na de rosto
+    const fixed = status && status.models[neededSet(mode)];
+    ready = !online() || Boolean(fixed && fixed.ok);
   } else {
     const usable = ["5b", "14b"].filter((model) => modelOk(mode, model));
     if (usable.length && !usable.includes(state.model)) choose("model", usable[0]);
@@ -647,7 +652,10 @@ function refreshForm() {
   $("#resolution-field").hidden = swap || face;
   $("#presets-field").hidden = swap || face;
   $("#swap-model").hidden = !(swap || face);
+  $("#swap-model span").textContent = face ? "FLUX.2 Klein" : "Wan 2.2 Animate";
   $("#swap-model small").textContent = face ? "troca de rosto em foto" : "troca de pessoa · 16 fps";
+  // A troca de rosto segue um pedido fixo (o da LoRA de troca de cabeca): nao ha prompt a escrever.
+  $("#prompt-field").hidden = face;
   $("#model-field").hidden = (swap || face) && onlySwap();  // um modelo so: nao ha o que mostrar
   $('[data-key="model"]').hidden = swap || face;
 
@@ -815,7 +823,7 @@ async function submit(event) {
     showError("O vídeo passa de 100 MB. Corte um trecho menor e envie de novo.");
     return;
   }
-  const prompt = $("#prompt").value.trim();
+  const prompt = state.mode === "face" ? "" : $("#prompt").value.trim();
   const seed = $("#seed").value.trim();
   const params = {
     mode: state.mode, model: state.model, aspect: state.aspect, resolution: state.resolution,
@@ -996,7 +1004,7 @@ function titleOf(job) {
 
 function describe(job) {
   const swap = job.mode === "swap";
-  const parts = [`Wan 2.2 ${MODEL_NAMES[job.model] || job.model}${job.fast && !swap && job.mode !== "face" ? " turbo" : ""}`];
+  const parts = [`${MODEL_NAMES[job.model] || job.model}${job.fast && !swap && job.mode !== "face" ? " turbo" : ""}`];
   if (swap && job.quality) parts.push(`qualidade ${QUALITY_NAMES[job.quality] || job.quality}`);
   parts.push(`${job.width}×${job.height}`);
   if (job.kind !== "image") parts.push(`${job.duration} s`);

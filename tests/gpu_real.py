@@ -153,9 +153,9 @@ TESTS = {
     "x_rosto": ({"mode": "swap", "duration": 1.0625, "quality": "rapida", "seed": 11,
                  "expert": {"size": [384, 224], "steps": 1, "chunk": 17, "onnx": "cpu", "face": True}},
                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
-    # Trocar rosto numa foto: o rosto da imagem de referencia na mulher do primeiro quadro do exemplo
-    # (a 256 px e um passo na CPU: so diz se o grafo roda e se o rosto volta para o lugar).
-    "x_foto": ({"mode": "face", "seed": 11, "expert": {"steps": 1, "onnx": "cpu", "max_size": 256}},
+    # Trocar rosto numa foto: o rosto da imagem de referencia na mulher do exemplo, de frente
+    # (o Klein a 512 px e um passo na CPU: so diz se o grafo roda e se a cabeca volta para o lugar).
+    "x_foto": ({"mode": "face", "seed": 11, "expert": {"steps": 1, "onnx": "cpu", "size": 512}},
                {"start_image": "pessoa.png", "end_image": "video_rosto.png"}),
     "x_cadeias": ({"mode": "swap", "duration": 4.0625, "quality": "rapida", "seed": 11,
                    "expert": {"size": [128, 128], "steps": 1, "chunk": 21, "onnx": "cpu", "chains": 2}},
@@ -225,15 +225,17 @@ TESTS = {
                {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
     "f_rosto": ({"mode": "swap", "duration": 3.0625, "quality": "boa", "seed": 12, "expert": {"worker": 1, "face": True}},
                 {"start_image": "pessoa.png", "video": "video_largo.mp4"}),
-    # ---- Trocar rosto numa foto (15/10/2026; modo "face"). O rosto da foto (gerada por IA) em
-    # exemplos/ na mulher do exemplo oficial, num quadro em que ela esta de frente: so o rosto, e
-    # com o cabelo junto.
-    # O que olhar: se o rosto se parece com o da foto, se a expressao e a da mulher, se a borda em
-    # volta do rosto aparece e se o resto da imagem ficou igual (`juntos r_foto r_foto_cabelo`).
+    # ---- Trocar rosto numa foto (modo "face", FLUX.2 Klein desde 16/10/2026). O rosto da foto
+    # (gerada por IA) em exemplos/ na mulher do exemplo oficial, num quadro em que ela esta de
+    # frente: a cabeca inteira (o padrao) e so o rosto; e a versao antiga, com o Animate.
+    # O que olhar: se o rosto se parece com o da foto, se a expressao e a pose sao as da mulher, se
+    # a borda da colagem aparece e se o resto da imagem ficou igual (`juntos r_foto r_foto_rosto`).
     "r_foto": ({"mode": "face", "seed": 21, "expert": {"worker": 0}},
                {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
-    "r_foto_cabelo": ({"mode": "face", "seed": 21, "hair": True, "expert": {"worker": 1}},
-                      {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
+    "r_foto_rosto": ({"mode": "face", "seed": 21, "hair": False, "expert": {"worker": 1}},
+                     {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
+    "r_foto_animate": ({"mode": "face", "seed": 21, "hair": True, "expert": {"worker": 1, "engine": "animate"}},
+                       {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
     # O caso de uso: a foto de uma pessoa num video em pe de 23 s, na qualidade boa, em duas cadeias.
     "c_humano": ({"mode": "swap", "duration": 23.5, "quality": "boa", "seed": 21, "expert": {"chains": 2}},
                  {"start_image": "retrato_vertical.png", "video": "vertical_30s.mp4"}),

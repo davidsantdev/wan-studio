@@ -11,6 +11,10 @@ modelo de recorte de primeiro plano, que pega cabelo solto, trancas e roupa larg
 WanStudioHeadWindow e WanStudioFacePaste: o rosto em detalhe (`face` na troca de pessoa, tambem
 opcional e sem conferencia na GPU): uma segunda passada do Animate so na cabeca, ampliada.
 
+WanStudioHeadCrop e WanStudioHeadPaste: a troca de rosto numa foto (modo "face"). Recortam a
+cabeca da foto com folga, para o FLUX.2 Klein a refazer com o rosto da outra foto, e a poem de
+volta no lugar. Estao no fim do arquivo.
+
 WanStudioWindow e WanStudioPaste: a "janela na pessoa" (`window` na troca de pessoa, tambem
 opcional e ainda sem conferencia na GPU). O primeiro recorta do pedaco o retangulo em que a
 pessoa esta, para o Animate gerar so ali; o segundo poe os quadros gerados de volta no video,
@@ -1047,10 +1051,189 @@ class WanStudioFacePaste:
         return (torch.from_numpy(frames),)
 
 
+# ---------------------------------------------------------------- troca de rosto numa foto
+#
+# O modo "face" (Trocar rosto) usa um modelo de edicao de imagem, o FLUX.2 Klein 9B, com a LoRA
+# de troca de cabeca BFS (huggingface.co/Alissonerdx/BFS-Best-Face-Swap): a foto da pessoa e a
+# do rosto entram como referencias e o modelo refaz a primeira com a cabeca da segunda. Antes
+# disso a cabeca da foto da pessoa e recortada com folga (cabelo e ombros) e levada a uns 1024 x
+# 1024 pixels; depois o resultado volta para o lugar, e o resto da foto fica com os pixels dela.
+# A versao anterior, com o Animate (um modelo de video) refazendo so o rosto, ficou muito ruim no
+# primeiro teste numa GPU, em 15/10/2026.
+
+PHOTO_SPAN = 4.5        # lado da janela na foto da pessoa, em raios da cabeca: cabeca, cabelo e ombros
+PHOTO_SOURCE_SPAN = 4.0 # o mesmo na foto do rosto (so a referencia: a cabeca grande, sem muito cenario)
+PHOTO_SIZE = 1024       # a janela e refeita com uns PHOTO_SIZE x PHOTO_SIZE pixels
+PHOTO_WHOLE = 0.6       # se a janela cobre esta fracao da foto ou mais, vai a foto inteira
+PHOTO_FEATHER = 0.06    # a colagem se desfaz no original ao longo desta fracao do lado da janela
+PHOTO_RING = 0.12       # na faixa da borda da janela (desta fracao do lado) a cor e trazida a do original...
+PHOTO_SAME = 0.12       # ...so onde o resultado mostra o mesmo que o original (o cabelo novo nao conta)
+
+
+def photo_region(meta, width, height, span=PHOTO_SPAN, whole=PHOTO_WHOLE):
+    """O retangulo (esquerda, cima, largura, altura) da foto que o modelo refaz: o quadrado de
+    `span` raios em volta da cabeca, ou a foto inteira quando ele cobriria `whole` dela ou mais.
+    None se a pose nao achou a cabeca."""
+    head = head_spot(meta, width, height)
+    if head is None:
+        return None
+    left, top, side = square_box(head[0], head[1], span * head[2], width, height)
+    if side * side >= whole * width * height:
+        return 0, 0, width, height
+    return left, top, side, side
+
+
+def work_size(width, height, size=PHOTO_SIZE):
+    """(largura, altura) em que um retangulo de `width` x `height` e refeito: a mesma proporcao,
+    uns `size` x `size` pixels no total, lados multiplos de 16."""
+    scale = size / np.sqrt(float(width) * float(height))
+    return max(256, int(round(width * scale / 16)) * 16), max(256, int(round(height * scale / 16)) * 16)
+
+
+def _smooth_step(weight):
+    weight = np.clip(weight, 0.0, 1.0)
+    return weight * weight * (3.0 - 2.0 * weight)
+
+
+def inner_ramp(height, width, x, y, full_width, full_height, feather):
+    """O peso (A x L) da janela: 1 no meio, caindo a 0 ao longo de `feather` pixels so nas bordas
+    que ficam dentro da foto (numa borda que e a da propria foto, nao ha com o que misturar)."""
+    def ramp(count):
+        return np.clip((np.arange(count) + 0.5) / max(1.0, feather), 0.0, 1.0)
+
+    rows, columns = np.ones(height), np.ones(width)
+    if y > 0:
+        rows = np.minimum(rows, ramp(height))
+    if y + height < full_height:
+        rows = np.minimum(rows, ramp(height)[::-1])
+    if x > 0:
+        columns = np.minimum(columns, ramp(width))
+    if x + width < full_width:
+        columns = np.minimum(columns, ramp(width)[::-1])
+    return _smooth_step(np.minimum(rows[:, None], columns[None, :])).astype(np.float32)
+
+
+def ellipse_weight(height, width, ellipse, inside=0.85, outside=1.15):
+    """O peso (A x L) da elipse (x, y, raio na largura, raio na altura): 1 ate `inside` dos raios,
+    caindo a 0 em `outside`."""
+    x, y, rx, ry = ellipse
+    yy, xx = np.ogrid[:height, :width]
+    distance = np.sqrt(((xx - x) / rx) ** 2 + ((yy - y) / ry) ** 2)
+    return _smooth_step((outside - distance) / (outside - inside)).astype(np.float32)
+
+
+def photo_pasted(frame, piece, x, y, face=None):
+    """A foto (A x L x 3, de 0 a 1) com `piece` (o retangulo refeito, ja no tamanho dele) posto em
+    (x, y). A cor do resultado e trazida a do original pela faixa da borda da janela, onde os dois
+    mostram o mesmo cenario; com `face` (a elipse do rosto, em pixels da foto), so o rosto e
+    colado, e o cabelo e o resto ficam os do original. Devolve (foto, correcao de cor ou None)."""
+    frame, piece = np.asarray(frame, dtype=np.float32), np.asarray(piece, dtype=np.float32)
+    full_height, full_width = frame.shape[:2]
+    height, width = piece.shape[:2]
+    original = frame[y:y + height, x:x + width]
+    side = min(width, height)
+    band = 1.0 - inner_ramp(height, width, 1, 1, width + 2, height + 2, PHOTO_RING * side)
+    weights = band * (np.abs(piece - original).max(axis=-1) < PHOTO_SAME)
+    reference, current = color_stats([original], [weights]), color_stats([piece], [weights])
+    fix = color_match(reference, current) if reference and current else None
+    if fix and all(item == NEUTRAL for item in fix):
+        fix = None
+    fixed = recolored(piece, fix) if fix else piece
+    weight = inner_ramp(height, width, x, y, full_width, full_height, max(4.0, PHOTO_FEATHER * side))
+    if face is not None:
+        fx, fy, rx, ry = face
+        weight = np.minimum(weight, ellipse_weight(height, width, (fx - x, fy - y, rx, ry)))
+    result = frame.copy()
+    result[y:y + height, x:x + width] = original * (1.0 - weight[..., None]) + fixed * weight[..., None]
+    return result, fix
+
+
+class WanStudioHeadCrop:
+    """A cabeca da pessoa numa foto, com folga (cabelo e ombros), ja no tamanho em que o modelo a
+    refaz; a foto inteira, se a cabeca ja a enche. Para com erro se nao achar um rosto de frente."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "image": ("IMAGE",),
+            "pose_data": ("POSEDATA", {"tooltip": "A pose da foto (PoseAndFaceDetection)."}),
+        }, "optional": {
+            "span": ("FLOAT", {"default": PHOTO_SPAN, "min": 2.0, "max": 12.0, "step": 0.5,
+                               "tooltip": "Lado da janela, em raios da cabeca."}),
+            "size": ("INT", {"default": PHOTO_SIZE, "min": 512, "max": 2048, "step": 16,
+                             "tooltip": "A janela e refeita com uns size x size pixels."}),
+            "photo": (["pessoa", "rosto"], {"default": "pessoa", "tooltip": "Qual das fotos e (so para a mensagem de erro)."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT", "INT", "INT", "INT", "INT")
+    RETURN_NAMES = ("image", "x", "y", "width", "height", "work_width", "work_height")
+    FUNCTION = "crop"
+    CATEGORY = "Wan Studio"
+    DESCRIPTION = "A cabeca da pessoa numa foto, com folga, no tamanho em que o modelo a refaz."
+
+    def crop(self, image, pose_data, span=PHOTO_SPAN, size=PHOTO_SIZE, photo="pessoa"):
+        _, height, width, _ = image.shape
+        metas = pose_data.get("pose_metas_original") or []
+        meta = metas[0] if metas else None
+        region = photo_region(meta, width, height, span) if face_ellipse(meta, width, height) else None
+        if region is None:
+            which = "na foto da pessoa que recebe o rosto" if photo == "pessoa" else "na foto do rosto"
+            raise ValueError(f"não encontrei um rosto de frente {which}")
+        left, top, wide, tall = region
+        work_width, work_height = work_size(wide, tall, size)
+        part = image[:1, top:top + tall, left:left + wide, :3].movedim(-1, 1)
+        resized = common_upscale(part, work_width, work_height, "lanczos", "disabled").movedim(1, -1).clamp(0, 1)
+        print(f"[wan_studio] {photo}: janela {wide}x{tall} em ({left}, {top}) de {width}x{height}, "
+              f"refeita em {work_width}x{work_height}", flush=True)
+        return (resized, left, top, wide, tall, work_width, work_height)
+
+
+class WanStudioHeadPaste:
+    """Poe a cabeca refeita de volta na foto: a janela inteira (cabeca e cabelo novos) ou, com
+    region=rosto, so o rosto, e o cabelo fica o da foto."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "images": ("IMAGE", {"tooltip": "A foto da pessoa, inteira."}),
+            "patch": ("IMAGE", {"tooltip": "A janela refeita (em qualquer tamanho: volta ao da janela)."}),
+            "x": ("INT", {"default": 0, "min": 0, "max": 16384}),
+            "y": ("INT", {"default": 0, "min": 0, "max": 16384}),
+            "width": ("INT", {"default": 512, "min": 1, "max": 16384}),
+            "height": ("INT", {"default": 512, "min": 1, "max": 16384}),
+        }, "optional": {
+            "pose_data": ("POSEDATA", {"tooltip": "A pose da foto: diz onde fica o rosto (region=rosto)."}),
+            "region": (["cabeca", "rosto"], {"default": "cabeca",
+                                             "tooltip": "cabeca: a janela inteira; rosto: so o rosto, com o cabelo da foto."}),
+        }}
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "paste"
+    CATEGORY = "Wan Studio"
+    DESCRIPTION = "Cola a cabeca refeita de volta na foto."
+
+    def paste(self, images, patch, x, y, width, height, pose_data=None, region="cabeca"):
+        frame = images[0, :, :, :3].float().cpu().numpy()
+        full_height, full_width = frame.shape[:2]
+        width, height = min(width, full_width - x), min(height, full_height - y)
+        piece = common_upscale(patch[:1, :, :, :3].movedim(-1, 1), width, height, "lanczos", "disabled")
+        piece = piece.movedim(1, -1)[0].clamp(0, 1).float().cpu().numpy()
+        face = None
+        if region == "rosto" and pose_data is not None:
+            metas = pose_data.get("pose_metas_original") or []
+            face = face_ellipse(metas[0], full_width, full_height) if metas else None
+        result, fix = photo_pasted(frame, piece, x, y, face)
+        print(f"[wan_studio] colagem: {'so o rosto' if face else 'a janela'} em ({x}, {y}), {width}x{height}"
+              + (f", cor corrigida {[(round(g, 3), round(o * 255, 1)) for g, o in fix]}" if fix else ""), flush=True)
+        return (torch.from_numpy(result)[None],)
+
+
 NODE_CLASS_MAPPINGS = {"WanStudioPersonMask": WanStudioPersonMask, "WanStudioFitReference": WanStudioFitReference,
                        "WanStudioWindow": WanStudioWindow, "WanStudioPaste": WanStudioPaste,
                        "WanStudioForegroundLoader": WanStudioForegroundLoader, "WanStudioWholePerson": WanStudioWholePerson,
-                       "WanStudioHeadWindow": WanStudioHeadWindow, "WanStudioFacePaste": WanStudioFacePaste}
+                       "WanStudioHeadWindow": WanStudioHeadWindow, "WanStudioFacePaste": WanStudioFacePaste,
+                       "WanStudioHeadCrop": WanStudioHeadCrop, "WanStudioHeadPaste": WanStudioHeadPaste}
 NODE_DISPLAY_NAME_MAPPINGS = {"WanStudioPersonMask": "Wan Studio: máscara da pessoa",
                               "WanStudioFitReference": "Wan Studio: enquadrar a imagem da pessoa",
                               "WanStudioWindow": "Wan Studio: janela na pessoa",
@@ -1058,4 +1241,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {"WanStudioPersonMask": "Wan Studio: máscara da pe
                               "WanStudioForegroundLoader": "Wan Studio: modelo de primeiro plano",
                               "WanStudioWholePerson": "Wan Studio: a pessoa inteira",
                               "WanStudioHeadWindow": "Wan Studio: a cabeça ampliada",
-                              "WanStudioFacePaste": "Wan Studio: colar a cabeça refeita"}
+                              "WanStudioFacePaste": "Wan Studio: colar a cabeça refeita",
+                              "WanStudioHeadCrop": "Wan Studio: a cabeça numa foto",
+                              "WanStudioHeadPaste": "Wan Studio: colar a cabeça na foto"}

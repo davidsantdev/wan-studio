@@ -8,7 +8,8 @@
 #                (imagem e video rapido), o melhorador de prompt e o 14B, em GGUF Q4 (GPUs
 #                gratuitas: Kaggle, Colab, Lightning AI). Numa placa de 24 GB ou mais o Animate
 #                vem em fp8, que e o que a qualidade "ultra" da troca de pessoa usa.
-#                Com SO_TROCA=1, so a troca de pessoa: 27 GB em vez de 83.
+#                Logo depois do Animate vem o FLUX.2 Klein, da troca de rosto numa foto (19 GB).
+#                Com SO_TROCA=1, so as duas trocas: 46 GB em vez de 102.
 #
 #   PHASE=all|core|extras|models
 #                           core vai ate o 5B ficar pronto; extras baixa o resto (MODELS=free);
@@ -240,6 +241,15 @@ set_animate() {  # set_animate <gguf|fp8>
   fi
 }
 
+# Troca de rosto numa foto: FLUX.2 Klein 9B (GGUF Q8), o codificador de texto dele (Qwen3 8B), o
+# VAE do FLUX.2 e a LoRA de troca de cabeca BFS. A deteccao de pose e a do Animate.
+set_klein() {
+  fetch "https://huggingface.co/unsloth/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q8_0.gguf" diffusion_models || return 1
+  fetch "https://huggingface.co/Comfy-Org/flux2-klein-9B/resolve/main/split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors" text_encoders || return 1
+  fetch "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors" vae || return 1
+  fetch "https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/resolve/main/bfs_head_v1_flux-klein_9b_step3750_rank64.safetensors" loras || return 1
+}
+
 set_foreground() {
   # O codigo do modelo vem junto dos pesos (o ComfyUI o carrega da pasta): por isso a versao fixa.
   local dir="$COMFY/models/BiRefNet/BiRefNet-portrait"
@@ -400,6 +410,10 @@ extras() {
     note "Wan 2.2 Animate, troca de pessoa ($(( need - 1 )) GB)"
     set_animate "$kind" || echo "aviso: o download do Animate falhou" >&2
   fi
+  if have_room 20 "o FLUX.2 Klein (troca de rosto)"; then
+    note "FLUX.2 Klein, troca de rosto (19 GB)"
+    set_klein || echo "aviso: o download do Klein (troca de rosto) falhou" >&2
+  fi
   if [ -z "${SO_TROCA:-}" ] && have_room 13 "o Wan 2.2 5B"; then
     note "Wan 2.2 5B, imagem e vídeo rápido (12 GB)"
     set_5b || echo "aviso: o download do 5B falhou" >&2
@@ -432,7 +446,8 @@ if [ "$PHASE" = models ]; then
   if [ -n "${TROCA_PRIMEIRO:-}" ] && [ "$MODELS" = free ]; then
     fetch "$W21/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors" text_encoders
     set_animate "$(animate_kind)" || echo "aviso: o download do Animate falhou" >&2
-    if [ -n "${SO_TROCA:-}" ]; then echo "modelos da troca de pessoa prontos"; exit 0; fi
+    set_klein || echo "aviso: o download do Klein (troca de rosto) falhou" >&2
+    if [ -n "${SO_TROCA:-}" ]; then echo "modelos das trocas de pessoa e de rosto prontos"; exit 0; fi
   fi
   core_models
   extras

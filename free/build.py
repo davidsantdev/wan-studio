@@ -8,7 +8,7 @@ Rode de novo sempre que alterar app/, vm/ ou free/launcher.py:
 
   python free/build.py
   python free/build.py --site https://meu-wan.netlify.app   (quando o site tiver endereco proprio)
-  python free/build.py --so-troca   (a sessao baixa so a troca de pessoa: 27 GB em vez de 83)
+  python free/build.py --so-troca   (a sessao baixa so as trocas de pessoa e de rosto: 46 GB em vez de 102)
 
 `free/pairing.json` guarda o segredo que liga o notebook ao site. Ele vai dentro do notebook:
 mantenha o notebook privado e nao publique esse arquivo.
@@ -38,7 +38,7 @@ CPU_ENV = {"SKIP_GPU_CHECK": "1", "KEEP_TORCH": "1", "SKIP_SPEEDUPS": "1", "PESS
            "WAN_COMFY_ARGS": "--cpu", "WAN_SAM2_DEVICE": "cpu", "WARM_UP": "0",
            "WAN_NTFY_URL": "http://127.0.0.1:9"}
 # A sessao de costume tem todos os modos, com a troca de pessoa baixando primeiro. Com
-# --so-troca ela baixa so a troca (27 GB em vez de 83) e deixa as duas GPUs para o video
+# --so-troca ela baixa so as trocas de pessoa e de rosto (46 GB em vez de 102) e deixa as duas GPUs para elas
 # (vm/setup.sh, SO_TROCA).
 SWAP_ENV = {"SO_TROCA": "1"}
 SHORTCUT_FILE = ROOT / "Wan Studio.url"
@@ -68,11 +68,12 @@ Para deixar rodando sem esta aba aberta, use *Save Version → Save & Run All (C
 """
 
 DOWNLOADS = {
-    True: "Os modelos da troca de pessoa (Wan 2.2 Animate, 20 GB) continuam baixando em segundo\n"
-          "plano por mais uns 3 minutos; o site libera o botão quando ficarem prontos.",
+    True: "Os modelos das trocas continuam baixando em segundo plano: o da troca de pessoa (Wan 2.2\n"
+          "Animate, 20 GB) em uns 3 minutos e o da troca de rosto (FLUX.2 Klein, 19 GB) logo depois;\n"
+          "o site libera cada uma quando o modelo dela fica pronto.",
     False: "Os modelos continuam baixando em segundo plano, a troca de pessoa primeiro (uns 3\n"
-           "minutos); depois a geração de imagem e de vídeo (5B), o melhorador de prompt e o 14B.\n"
-           "Cada modo aparece no site quando o modelo dele fica pronto.",
+           "minutos); depois a troca de rosto, a geração de imagem e de vídeo (5B), o melhorador de\n"
+           "prompt e o 14B. Cada modo aparece no site quando o modelo dele fica pronto.",
 }
 
 SETUP = '''\
@@ -213,7 +214,7 @@ def main():
     parser.add_argument("--env", action="append", default=[], metavar="NOME=valor",
                         help="variavel de ambiente para a sessao (so para medir na GPU; refaca sem ela depois)")
     parser.add_argument("--so-troca", action="store_true",
-                        help="a sessao baixa so a troca de pessoa (27 GB em vez de 83) e o site mostra so ela")
+                        help="a sessao baixa so as trocas de pessoa e de rosto (46 GB em vez de 102) e o site mostra so elas")
     parser.add_argument("--cpu", action="store_true",
                         help="gera o notebook da sessao sem GPU (free/wan_studio_cpu.ipynb), para conferir o "
                              "codigo sem gastar cota: python free/ligar.py --cpu")
@@ -230,7 +231,7 @@ def main():
     build_notebook(pairing, env)
     if tests:
         print(f"ATENCAO: notebook de teste, com {tests}. Rode de novo sem --env antes de usar de verdade.")
-    print("sessao: " + ("so a troca de pessoa (--so-troca)" if args.so_troca else "todos os modos, a troca de pessoa primeiro"))
+    print("sessao: " + ("so as trocas de pessoa e de rosto (--so-troca)" if args.so_troca else "todos os modos, a troca de pessoa primeiro"))
     for path in (SITE_FILE, NOTEBOOK_FILE, SHORTCUT_FILE):
         print(f"{path.relative_to(ROOT)}  ({max(1, path.stat().st_size // 1024)} KB)")
     if pairing["site"]:

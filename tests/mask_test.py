@@ -476,26 +476,88 @@ def main():
     check("U1b de costas (a pose nao acha nariz nem olho) nao ha rosto a trocar, mesmo com pontos do rosto arriscados",
           node.face_ellipse({"keypoints_face": face, "keypoints_body": front}, 100, 100) is not None
           and node.face_ellipse({"keypoints_face": face, "keypoints_body": back}, 100, 100) is None)
+    # ---- Trocar rosto numa foto com o FLUX.2 Klein (o padrao): a cabeca refeita numa janela.
+    klein_files = {"unet": "klein.gguf", "klein_clip": "qwen3.safetensors", "head_lora": "bfs.safetensors",
+                   "vae": "flux2.safetensors", "vitpose": "vp.onnx", "yolo": "y.onnx"}
     photo = workflows.resolve({"mode": "face", "seed": 1}, True, True)
-    photo_nodes = workflows.build(photo, {**files, "lora": "l.safetensors"}, "p", "n", "x", start_image="rosto.png", end_image="corpo.png")[0]
-    photo_kinds = {item["class_type"]: (key, item["inputs"]) for key, item in photo_nodes.items()}
-    head_inputs = photo_kinds["WanStudioHeadWindow"][1]
-    check("U2 grafo da troca de rosto: a foto vira um video parado, so o rosto e refeito (mesmo grande) e sai a imagem do meio",
-          photo_kinds["RepeatImageBatch"][1]["amount"] == 5 and head_inputs["region"] == "rosto" and head_inputs["always"] is True
-          and "mask" not in head_inputs and photo_kinds["ImageFromBatch"][1]["batch_index"] == 2
-          and photo_kinds["SaveImage"][1]["images"] == [photo_kinds["ImageFromBatch"][0], 0]
-          and photo_kinds["WanStudioFitReference"][1]["region"] == "cabeca" and photo["kind"] == "image")
-    hair = workflows.build({**photo, "hair": True}, {**files, "lora": "l.safetensors"}, "p", "n", "x", start_image="r.png",
-                           end_image="c.png")[0]
+    photo_nodes = workflows.build(photo, klein_files, "p", "n", "x", start_image="rosto.png", end_image="corpo.png")[0]
+    listed = {}
+    for key, item in photo_nodes.items():
+        listed.setdefault(item["class_type"], []).append((key, item["inputs"]))
+    loads = {inputs["image"]: key for key, inputs in listed["LoadImage"]}
+    crops = {inputs["photo"]: (key, inputs) for key, inputs in listed["WanStudioHeadCrop"]}
+    encoded = {inputs["pixels"][0]: key for key, inputs in listed["VAEEncode"]}
+    references = dict(listed["ReferenceLatent"])
+    sampler = listed["SamplerCustomAdvanced"][0][1]
+    guider = photo_nodes[sampler["guider"][0]]["inputs"]
+    second = references[guider["positive"][0]]  # a ultima referencia posta: a da foto do rosto
+    first = references[second["conditioning"][0]]
+    prompt = photo_nodes[first["conditioning"][0]]["inputs"]
+    paste_key, paste = listed["WanStudioHeadPaste"][0]
+    check("U2 grafo da troca de rosto: a cabeca da foto da pessoa, com folga, refeita pelo Klein com a LoRA, a foto da "
+          "pessoa como primeira referencia e a do rosto como segunda, e colada de volta na foto",
+          photo["model"] == "klein" and photo["hair"] is True and photo["kind"] == "image"
+          and crops["pessoa"][1]["image"] == [loads["corpo.png"], 0] and crops["rosto"][1]["image"] == [loads["rosto.png"], 0]
+          and crops["rosto"][1]["span"] == workflows.KLEIN_SOURCE_SPAN and "span" not in crops["pessoa"][1]
+          and first["latent"] == [encoded[crops["pessoa"][0]], 0] and second["latent"] == [encoded[crops["rosto"][0]], 0]
+          and prompt["text"] == workflows.KLEIN_PROMPT and "head_swap" in prompt["text"]
+          and listed["CLIPLoader"][0][1]["type"] == "flux2" and listed["LoraLoaderModelOnly"][0][1]["lora_name"] == "bfs.safetensors"
+          and photo_nodes[sampler["sigmas"][0]]["inputs"]["steps"] == 4 and guider["cfg"] == 1.0
+          and photo_nodes[sampler["sampler"][0]]["inputs"]["sampler_name"] == "lcm"
+          and photo_nodes[sampler["latent_image"][0]]["inputs"]["width"] == [crops["pessoa"][0], 5]
+          and paste["images"] == [loads["corpo.png"], 0] and paste["x"] == [crops["pessoa"][0], 1] and paste["region"] == "cabeca"
+          and listed["SaveImage"][0][1]["images"] == [paste_key, 0] and workflows.required_set(photo["model"], "face") == "klein",
+          str(sorted(listed)))
+    bare = workflows.build({**photo, "hair": False}, klein_files, "p", "n", "x", start_image="r.png", end_image="c.png")[0]
+    bare_paste = next(item for item in bare.values() if item["class_type"] == "WanStudioHeadPaste")["inputs"]
+    bare_texts = [item["inputs"]["text"] for item in bare.values() if item["class_type"] == "CLIPTextEncode"]
+    old = workflows.resolve({"mode": "face", "seed": 1, "hair": False, "expert": {"engine": "animate"}}, True, True)
+    old_nodes = workflows.build(old, {**files, "lora": "l.safetensors"}, "p", "n", "x", start_image="r.png", end_image="c.png")[0]
+    old_head = next(item for item in old_nodes.values() if item["class_type"] == "WanStudioHeadWindow")["inputs"]
     refused = []
     for has_face, has_body in ((False, True), (True, False)):
         try:
             workflows.resolve({"mode": "face"}, has_face, has_body)
         except ValueError as error:
             refused.append(str(error))
-    check("U3 com o cabelo junto refaz a cabeca inteira; sem uma das fotos, recusa dizendo qual falta",
-          next(item for item in hair.values() if item["class_type"] == "WanStudioHeadWindow")["inputs"]["region"] == "cabeca"
-          and len(refused) == 2 and "rosto" in refused[0] and "receber o rosto" in refused[1], str(refused))
+    try:
+        workflows.resolve({"mode": "face", "expert": {"engine": "outro"}}, True, True)
+    except ValueError as error:
+        refused.append(str(error))
+    check("U3 sem o cabelo so o rosto volta para a foto e o pedido diz para manter o penteado; o Animate fica como ajuste "
+          "de teste; sem uma das fotos, recusa dizendo qual falta",
+          bare_paste["region"] == "rosto" and workflows.KLEIN_PROMPT_FACE in bare_texts
+          and old["model"] == "animate" and workflows.required_set(old["model"], "face") == "animate"
+          and old_head["region"] == "rosto" and old_head["always"] is True
+          and len(refused) == 3 and "rosto" in refused[0] and "receber o rosto" in refused[1], str(refused))
+
+    # A janela da cabeca numa foto e a colagem de volta (vm/nodes/wan_studio, WanStudioHeadCrop/HeadPaste).
+    small = {"keypoints_body": body(**{"0": (0.5, 0.3), "14": (0.49, 0.29), "15": (0.51, 0.29), "1": (0.5, 0.36)})}
+    close = {"keypoints_body": body(**{"0": (0.5, 0.45), "14": (0.4, 0.35), "15": (0.6, 0.35), "1": (0.5, 0.9)})}
+    region = node.photo_region(small, 1000, 1000)
+    check("K1 a janela: um quadrado de 4,5 raios em volta da cabeca pequena; a foto inteira quando a cabeca ja a enche",
+          region is not None and region[2] == region[3] and 250 < region[2] < 500 and region[0] < 500 < region[0] + region[2]
+          and region[1] < 300 < region[1] + region[3] and node.photo_region(close, 1000, 1000) == (0, 0, 1000, 1000)
+          and node.photo_region({"keypoints_body": body()}, 1000, 1000) is None, str(region))
+    sizes = node.work_size(360, 360), node.work_size(1000, 1500), node.work_size(3000, 4000)
+    check("K2 refeita com uns 1024 x 1024 pixels, na proporcao da janela, lados multiplos de 16",
+          sizes[0] == (1024, 1024) and all(side % 16 == 0 for size in sizes for side in size)
+          and abs(sizes[1][1] / sizes[1][0] - 1.5) < 0.02 and abs(sizes[2][0] * sizes[2][1] / 1024 ** 2 - 1) < 0.05, str(sizes))
+    rng = np.random.default_rng(3)
+    frame = np.clip(0.45 + 0.1 * rng.random((200, 200, 3)), 0, 1).astype(np.float32)
+    piece = frame[50:150, 50:150].copy() + 0.05  # o modelo clareou tudo um pouco...
+    piece[30:70, 30:70] = 0.9                     # ...e trocou a cabeca
+    result, fix = node.photo_pasted(frame, piece, 50, 50)
+    check("K3 a colagem: a cabeca nova no lugar, a cor trazida a do original pela borda da janela, sem degrau na borda e "
+          "nada mudado fora dela",
+          fix is not None and abs(fix[0][1] + 0.05) < 0.01 and abs(result[100, 100, 0] - 0.85) < 0.02
+          and np.abs(result[:50] - frame[:50]).max() == 0 and np.abs(result[50, 50:150] - frame[50, 50:150]).max() < 0.01
+          and np.abs(result[60:140, 60:65] - frame[60:140, 60:65]).max() < 0.02, str(fix))
+    edge, _ = node.photo_pasted(frame, piece, 0, 0)
+    only, _ = node.photo_pasted(frame, piece, 50, 50, face=(100.0, 100.0, 12.0, 15.0))
+    check("K4 na borda da foto a janela vale ate a beirada; so o rosto: fora da elipse fica o original",
+          abs(edge[0, 0, 0] - (piece[0, 0, 0] - 0.05)) < 0.02 and abs(only[100, 100, 0] - 0.85) < 0.02
+          and np.abs(only[100, 125] - frame[100, 125]).max() < 1e-6 and np.abs(only[75, 100] - frame[75, 100]).max() < 1e-6)
 
     first = windowed({"window": True, "window_margin": 96})[1]
     loose = windowed({"window": True}, replace=False)[1]
