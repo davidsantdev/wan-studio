@@ -43,6 +43,9 @@ ENHANCER_WORKER = int(os.environ.get("ENHANCER_WORKER", "-1"))
 # A sessao so faz troca de pessoa (vm/setup.sh nao baixou os outros modelos nem o melhorador
 # de prompt): o site mostra so esse modo.
 ONLY_SWAP = bool(os.environ.get("SO_TROCA"))
+# Sessao enxuta so da troca de rosto em video (Lightning): so o FaceFusion; o melhorador de
+# prompt e os outros modos nem foram baixados.
+ONLY_FACE = bool(os.environ.get("SO_ROSTO"))
 # Cinco minutos: quem faz uma troca de pessoa atras da outra nao espera o melhorador recarregar
 # (um minuto) e descarregar de novo a cada pedido.
 ENHANCER_RETURN_AFTER = float(os.environ.get("ENHANCER_RETURN_AFTER", "300"))
@@ -104,6 +107,7 @@ MODEL_LISTS = {
     "upscale": ("UpscaleModelLoader", "model_name"),
     "frame_interpolation": ("FrameInterpolationModelLoader", "model_name"),
     "foreground": ("WanStudioForegroundLoader", "model"),
+    "faceswap": ("WanStudioFaceFusion", "swapper"),  # os modelos de troca do FaceFusion
 }
 # Nos de pacotes extras cuja presenca decide se um conjunto pode ser usado.
 EXTRA_NODES = sorted({node for entry in workflows.CATALOG.values() for node in entry.get("nodes", ())})
@@ -371,6 +375,45 @@ async def prepare_video(source, target, spec):
                 duration=round(total / fps, 1), chunks=len(pieces), chunks_done=0, plan=pieces)
 
 
+async def video_fps(path):
+    """Quadros por segundo do video (0 se o arquivo nao informar)."""
+    out = await run_tool("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                         "stream=avg_frame_rate,r_frame_rate", "-of", "json", str(path))
+    stream = (json.loads(out).get("streams") or [{}])[0]
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        top, _, bottom = str(stream.get(key, "0/1")).partition("/")
+        try:
+            value = float(top) / float(bottom or 1)
+        except (ValueError, ZeroDivisionError):
+            continue
+        if value > 0:
+            return value
+    return 0.0
+
+
+async def prepare_face_video(source, target, spec):
+    """O video da troca de rosto: o trecho pedido, no tamanho e na velocidade do original (ate
+    FACE_VIDEO_SIDE no lado maior e FACE_VIDEO_FPS quadros por segundo), com o som. Completa a
+    especificacao do job com o tamanho, os quadros e a duracao."""
+    shown_width, shown_height, duration = await probe_video(source)
+    seconds = min(spec["seconds"], duration - spec["start"]) if duration else spec["seconds"]
+    if seconds < 0.5:
+        raise ValueError("o trecho do vídeo precisa ter pelo menos meio segundo")
+    scale = min(1.0, workflows.FACE_VIDEO_SIDE / max(shown_width, shown_height))
+    width, height = max(2, round(shown_width * scale / 2) * 2), max(2, round(shown_height * scale / 2) * 2)
+    fps = min(await video_fps(source) or workflows.FACE_VIDEO_FPS, workflows.FACE_VIDEO_FPS)
+    await run_tool(
+        "ffmpeg", "-nostdin", "-y", "-v", "error", "-ss", f"{spec['start']:.3f}", "-i", str(source),
+        "-map", "0:v:0", "-map", "0:a:0?", "-t", f"{seconds:.3f}",
+        "-vf", f"fps={fps:.3f},scale={width}:{height},setsar=1",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "14", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(target))
+    frames = await count_frames(target)
+    if frames < 1:
+        raise ValueError("o vídeo enviado não pôde ser lido")
+    spec.update(width=width, height=height, fps=round(fps, 3), length=frames, duration=round(frames / fps, 1))
+
+
 # ---------------------------------------------------------------- resultado
 
 def output_items(entry, prefix, suffix):
@@ -555,7 +598,7 @@ async def finish_task(app, worker, job, task, entry):
                 return fail(job, "o ComfyUI terminou sem gerar o arquivo")
             target = OUTPUTS / (job["id"] + EXTENSIONS[job["kind"]])
             await download(app, worker, items[0], target)
-            if job["mode"] == "face":  # o tamanho de verdade (a foto pode ter vindo girada)
+            if job["mode"] == "face" and job["kind"] == "image":  # o tamanho de verdade (a foto pode ter vindo girada)
                 job["width"], job["height"] = image_size(target.read_bytes()[:64 * 1024]) or (job["width"], job["height"])
             return complete(job, target)
         # Com interpolacao, o pedaco traz tambem os quadros intermediarios (stitch.fine); o
@@ -683,6 +726,10 @@ async def start_task(app, worker, task):
                               job["fps"], lossless=True)
             video = await upload_file(app, worker, f"wanstudio_{task['prefix']}.mp4", source.read_bytes(), "video/mp4")
             graph, samplers, stages = workflows.build_restore(job, job["files"], task["prefix"], video)
+        elif job["mode"] == "face" and job["kind"] == "video":
+            names["video"] = await upload_file(
+                app, worker, f"wanstudio_{task['prefix']}.mp4", (job["workdir"] / "preparado.mp4").read_bytes(),
+                "video/mp4")
         elif job["mode"] == "swap":
             names["video"] = await upload_file(
                 app, worker, f"wanstudio_{task['prefix']}.mp4", task["video"].read_bytes(), "video/mp4")
@@ -1000,7 +1047,7 @@ async def get_status(request):
         "enhancer": {"state": enhancer.state, "detail": enhancer.detail},
         "extras": extras_note(), "idle": idle_info(), "shutdown": STATE["shutdown"],
         "restart": STATE["restart"], "managed": MANAGED, "ram": memory_gb(), "now": time.time(),
-        "price_hour": PRICE_HOUR or None, "focus": "swap" if ONLY_SWAP else None,
+        "price_hour": PRICE_HOUR or None, "focus": "swap" if ONLY_SWAP else "rosto" if ONLY_FACE else None,
     }
     try:
         sets = await catalog(app)
@@ -1112,24 +1159,25 @@ async def accept(request, batch, workdir):
         spec = workflows.resolve(params, "start_image" in images, "end_image" in images,
                                  video is not None)
         swap = spec["mode"] == "swap"
-        animate = spec["mode"] in ("swap", "face")  # as trocas (de pessoa e de rosto) usam o Animate
-        if spec["mode"] == "face":  # o tamanho do resultado e o da foto que recebe o rosto
+        face_video = spec["mode"] == "face" and spec["kind"] == "video"  # a troca de rosto num video
+        animate = spec["mode"] in ("swap", "face")  # as trocas (de pessoa e de rosto)
+        if spec["mode"] == "face" and not face_video:  # o tamanho do resultado e o da foto que recebe o rosto
             spec["width"], spec["height"] = image_size(images["end_image"][1]) or (0, 0)
         # Camera, efeito e estilo nao se aplicam as trocas: o video (ou a foto) dita a cena.
         look = {key: "none" if animate else str(params.get(key, "none"))
                 for key in ("camera", "effect", "style")}
         presets.compose_prompt("x", look["camera"], look["effect"], look["style"])
-        count = 1 if swap else min(max(int(params.get("count", 1)), 1), MAX_BATCH)
+        count = 1 if swap or face_video else min(max(int(params.get("count", 1)), 1), MAX_BATCH)
         if spec.get("pin") is not None and spec["pin"] >= len(WORKERS):
             raise ValueError("ajuste de teste inválido")
     except (ValueError, TypeError) as exc:  # inclui JSON invalido
         return json_error(str(exc), 400)
-    if not swap:  # um video enviado fora da troca de pessoa nao serve para nada
+    if not (swap or face_video):  # um video enviado fora das trocas num video nao serve para nada
         shutil.rmtree(workdir, ignore_errors=True)
 
     needed = workflows.required_set(spec["model"], spec["mode"])
     wanted = {"t2v": (), "img": (), "i2v": ("start_image",), "flf": ("start_image", "end_image"),
-              "swap": ("start_image",), "face": ("start_image", "end_image")}
+              "swap": ("start_image",), "face": ("start_image",) if face_video else ("start_image", "end_image")}
     try:
         sets = await catalog(app)
         if not sets[needed]["ok"]:
@@ -1150,6 +1198,10 @@ async def accept(request, batch, workdir):
                 raise ValueError("ajuste de teste inválido: o modelo do recorte da pessoa inteira não está instalado")
             await prepare_video(video, workdir / "preparado.mp4", spec)
             spec["factor"] = workflows.smooth_factor(spec, sets[needed]["files"])
+            video.unlink(missing_ok=True)
+            spec["workdir"] = workdir
+        elif face_video:
+            await prepare_face_video(video, workdir / "preparado.mp4", spec)
             video.unlink(missing_ok=True)
             spec["workdir"] = workdir
     except (aiohttp.ClientError, asyncio.TimeoutError):
@@ -1329,7 +1381,7 @@ async def background(app):
     app["tasks"] = set()
     app["engine"] = asyncio.Lock()
     app["freeing"] = asyncio.Lock()
-    if not ONLY_SWAP:  # o modelo dele nem foi baixado: ficaria esperando para sempre
+    if not ONLY_SWAP and not ONLY_FACE:  # o modelo dele nem foi baixado: ficaria esperando para sempre
         enhancer.start()
     await clear_queues(app)
     loops = [asyncio.create_task(poller(app))]

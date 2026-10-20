@@ -94,8 +94,10 @@ def power_off():
 
 def choose_storage():
     """Decide onde ficam os modelos e ajusta o ambiente que o instalador le."""
+    # A sessao enxuta (so a troca de rosto em video) ocupa uns 9 GB; a completa, uns 60.
+    need = 12 if os.environ.get("SO_ROSTO") else MODELS_GB
     persist = int(float(os.environ.get("WAN_PERSIST_GB") or 0))
-    if persist >= MODELS_GB:
+    if persist >= need:
         os.environ["DISK_BUDGET_GB"] = str(persist)
         return print(f"Modelos no disco do Studio (até {persist} GB): ficam guardados entre as sessões.")
     # O que fica na pasta do Studio e guardado pelo Lightning e conta para o disco da conta;
@@ -109,7 +111,7 @@ def choose_storage():
         except OSError:
             continue
         outside = kept != path and kept not in path.parents
-        if outside and free >= MODELS_GB and os.access(folder, os.W_OK):
+        if outside and free >= need and os.access(folder, os.W_OK):
             os.environ["MODELS_DIR"] = f"{folder}/wan-models"
             return print(f"Modelos em {folder}/wan-models ({free} GB livres), fora do disco guardado: serão "
                          "baixados de novo a cada vez que a máquina ligar.")
@@ -142,6 +144,10 @@ def single():
 def main():
     if not single():
         return 0
+    # No Lightning a sessao sobe enxuta, so para a troca de rosto em video (ComfyUI + FaceFusion,
+    # uns 9 GB): e o que cabe bem no credito gratuito. WAN_FULL=1 traz o estudio inteiro de volta.
+    if not os.environ.get("WAN_FULL"):
+        os.environ.setdefault("SO_ROSTO", "1")
     finished = threading.Event()
     threading.Thread(target=keep_awake, args=(finished,), daemon=True).start()
     code = 1

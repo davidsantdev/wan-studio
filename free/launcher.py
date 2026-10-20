@@ -31,7 +31,16 @@ NTFY_URL = os.environ.get("WAN_NTFY_URL", "https://ntfy.sh").rstrip("/")
 CLOUDFLARED = ("https://github.com/cloudflare/cloudflared/releases/latest/download/"
                "cloudflared-linux-amd64")
 ANNOUNCE_EVERY = 300
-TUNNEL_CHECK_EVERY = 120
+TUNNEL_CHECK_EVERY = 60     # o endereco publico e conferido a cada minuto; 3 falhas seguidas, outro tunel
+TUNNEL_TRIES = 3            # tuneis abertos, um depois do outro, ate um responder por fora
+TUNNEL_READY_SECONDS = 45   # quanto um endereco novo tem para comecar a responder
+# Os tipos de tunel, na ordem em que sao tentados quando o site avisa que nao alcanca o endereco
+# (veja `site_cannot_reach`): o tunel rapido do Cloudflare (QUIC, o de sempre), o mesmo por
+# HTTP/2 e o localhost.run, por SSH, que nao passa pelo Cloudflare. Em 16/10/2026 o tunel do
+# Cloudflare que saia do Kaggle respondia 530 no Brasil e normal de dentro do Kaggle.
+TUNNELS = ("cloudflare", "cloudflare-http2", "localhost.run")
+REPORTS_EVERY = 20          # segundos entre uma olhada e outra nos avisos do site
+TUNNEL_SWAP_GAP = 60        # um tunel novo tem este tempo antes de outro aviso troca-lo de novo
 REPORT_EVERY = 300
 POSIX = os.name == "posix"
 
@@ -40,7 +49,8 @@ POSIX = os.name == "posix"
 # servidor (ou None), para quem hospeda a sessao registrar que ela esta viva.
 SESSION = {"procs": {}, "url": None, "password": None, "site": "", "idle_minutes": 0,
            "announced": 0.0, "announce_failed": False, "workers": 1, "args": {},
-           "external": False, "tick": None}
+           "external": False, "tick": None, "tunnel_kind": 0, "tunnel_at": 0.0, "reports_since": None,
+           "reports_at": 0.0}
 
 
 def load_pairing():
@@ -68,8 +78,8 @@ def spawn(name, cmd, cwd, **extra_env):
     # no registro em que ponto cada thread estava.
     env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONFAULTHANDLER": "1", **extra_env}
     # Sessao propria: o processo sobrevive a celula e pode ser encerrado com os filhos.
-    proc = subprocess.Popen([str(part) for part in cmd], cwd=str(cwd), env=env, stdout=log,
-                            stderr=subprocess.STDOUT, start_new_session=POSIX)
+    proc = subprocess.Popen([str(part) for part in cmd], cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                            stdout=log, stderr=subprocess.STDOUT, start_new_session=POSIX)
     SESSION["procs"][name] = proc
     return proc
 
@@ -275,19 +285,53 @@ def start_extras():
 
 
 def start_tunnel():
-    """Abre o tunel publico e devolve o endereco https."""
+    """Abre o tunel publico e devolve o endereco https. Um tunel rapido do Cloudflare as vezes
+    nasce quebrado: o endereco existe, mas responde 530 (o tunel nao se ligou a rede deles) e o
+    site nunca conecta; em 16/10/2026 uma sessao ficou assim ate o usuario desligar a GPU. Por
+    isso o endereco so vale depois de responder por fora; se nao responder, abre-se outro.
+    (Responder daqui nao garante que o site o alcance: para isso ha o aviso do site,
+    `site_cannot_reach`.)"""
+    SESSION["tunnel_at"] = time.time()
+    for attempt in range(1, TUNNEL_TRIES + 1):
+        url = open_tunnel(TUNNELS[SESSION["tunnel_kind"] % len(TUNNELS)])
+        deadline = time.time() + TUNNEL_READY_SECONDS
+        while time.time() < deadline and alive("tunnel"):
+            if http_ok(f"{url}/api/presets", SESSION["password"], timeout=10) is not None:
+                return url
+            time.sleep(3)
+        if attempt < TUNNEL_TRIES:
+            print(f"O endereço {url} não respondeu; abrindo outro túnel...")
+            kill(SESSION["procs"]["tunnel"])
+    print("(aviso: o endereço público ainda não responde; se não voltar, a sessão abre outro sozinha)")
+    return url
+
+
+def open_tunnel(kind=TUNNELS[0]):
+    """Sobe o tunel do tipo `kind` (veja TUNNELS) e devolve o endereco https que ele recebeu
+    (sem saber se ja responde)."""
     override = os.environ.get("WAN_TUNNEL_CMD")  # so para testes
     if override:
         cmd, pattern = json.loads(override), r"https?://[^\s\"']+"
+    elif kind == "localhost.run":
+        cmd = ["ssh", "-T", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+               "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
+               "-R", f"80:127.0.0.1:{STUDIO_PORT}", "nokey@localhost.run"]
+        pattern = r"https://[a-z0-9-]+\.lhr\.life"
     else:
         binary = ROOT / "cloudflared"
         if not binary.exists():
             urllib.request.urlretrieve(CLOUDFLARED, binary)
             binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-        cmd = [binary, "tunnel", "--no-autoupdate", "--url", STUDIO_URL]
+        protocol = ["--protocol", "http2"] if kind == "cloudflare-http2" else []
+        cmd = [binary, "tunnel", "--no-autoupdate", *protocol, "--url", STUDIO_URL]
         pattern = r"https://[a-z0-9-]+\.trycloudflare\.com"
 
-    spawn("tunnel", cmd, ROOT)
+    try:
+        spawn("tunnel", cmd, ROOT)
+    except OSError as error:  # sem o programa (o ssh, por exemplo): o proximo tipo
+        print(f"(aviso: o túnel {kind} não abriu: {error})")
+        SESSION["tunnel_kind"] += 1
+        return open_tunnel(TUNNELS[SESSION["tunnel_kind"] % len(TUNNELS)])
     for _ in range(90):
         found = re.search(pattern, (LOGS / "tunnel.log").read_text(encoding="utf-8", errors="replace"))
         if found:
@@ -315,6 +359,54 @@ def encrypt(payload):
     nonce = secrets.token_bytes(12)
     sealed = AESGCM(key).encrypt(nonce, json.dumps(payload).encode(), None)
     return base64.urlsafe_b64encode(nonce + sealed).decode()
+
+
+def decrypt(text):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    key = base64.urlsafe_b64decode(PAIRING["key"] + "=" * (-len(PAIRING["key"]) % 4))
+    raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    return json.loads(AESGCM(key).decrypt(raw[:12], raw[12:], None))
+
+
+def site_cannot_reach():
+    """O site avisou (cifrado, no topico de avisos do pareamento) que nao alcanca o endereco
+    anunciado? O tunel pode responder daqui e nao de onde o usuario esta."""
+    if not (PAIRING.get("topic") and PAIRING.get("key")) or not SESSION["url"]:
+        return False
+    since = SESSION["reports_since"] or str(int(SESSION["tunnel_at"] or time.time()))
+    try:
+        request = urllib.request.Request(f"{NTFY_URL}/{PAIRING['topic']}-avisos/json?poll=1&since={since}",
+                                         headers={"User-Agent": "wan-studio"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            lines = response.read().decode("utf-8", "replace").splitlines()
+    except Exception:  # sem o servico de avisos, fica so a conferencia de dentro
+        return False
+    reached = False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+            if entry.get("event") != "message":
+                continue
+            SESSION["reports_since"] = entry.get("id") or SESSION["reports_since"]
+            report = decrypt(entry.get("message", ""))
+        except Exception:  # aviso ilegivel (de outra chave, ou mexido): ignorado
+            continue
+        if report.get("t") == "inacessivel" and report.get("u") == SESSION["url"]:
+            reached = True
+    return reached
+
+
+def swap_tunnel(reason):
+    """Troca o tunel pelo proximo tipo e anuncia o endereco novo."""
+    SESSION["tunnel_kind"] += 1
+    kind = TUNNELS[SESSION["tunnel_kind"] % len(TUNNELS)]
+    print(f"{reason}; abrindo outro túnel ({kind})...")
+    if "tunnel" in SESSION["procs"]:
+        kill(SESSION["procs"]["tunnel"])
+    start_tunnel()
+    announce()
+    banner()
 
 
 def announce(off=False):
@@ -449,6 +541,11 @@ def keepalive():
             start_tunnel()
             announce()
             banner()
+        elif time.time() - SESSION["reports_at"] > REPORTS_EVERY:
+            SESSION["reports_at"] = time.time()
+            if site_cannot_reach() and time.time() - SESSION["tunnel_at"] > TUNNEL_SWAP_GAP:
+                tunnel_misses = 0
+                swap_tunnel(f"O site não alcança {SESSION['url']}")
 
         extras = SESSION["procs"].get("extras")
         if extras and extras.poll() is not None and not extras_reported:

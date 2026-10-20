@@ -49,11 +49,25 @@
       </div>
       <p id="swap-note" class="note" hidden>A pessoa da imagem entra no lugar da pessoa principal do vídeo, com os mesmos movimentos e expressões. Ela precisa aparecer no primeiro quadro do trecho, de preferência inteira: o que só surge depois pode sobrar no resultado. Use apenas imagens de pessoas que autorizaram.</p>
       <div id="face-options" class="field" hidden>
-        <p class="note">O rosto da primeira foto entra na pessoa da segunda, que fica com o corpo, a roupa, a expressão e o cenário dela. Funciona melhor com os dois rostos de frente e bem iluminados. Use apenas imagens de pessoas que autorizaram.</p>
-        <label class="check">
+        <span class="field-title">Trocar o rosto numa</span>
+        <div class="segmented compact" data-key="target">
+          <button type="button" data-value="foto">Foto</button>
+          <button type="button" data-value="video">Vídeo</button>
+        </div>
+        <p class="note" id="face-note">O rosto da primeira foto entra na pessoa da segunda, que fica com o corpo, a roupa, a expressão e o cenário dela. Funciona melhor com os dois rostos de frente e bem iluminados. Use apenas imagens de pessoas que autorizaram.</p>
+        <label class="check" id="hair-row">
           <input type="checkbox" id="hair" checked>
           <span>Levar o cabelo junto (troca a cabeça inteira; desmarcado, fica o cabelo da segunda foto)</span>
         </label>
+        <div class="field" id="face-quality-row" hidden>
+          <span class="field-title">Qualidade</span>
+          <div class="segmented compact" data-key="faceQuality">
+            <button type="button" data-value="expresso">Expresso</button>
+            <button type="button" data-value="boa">Boa</button>
+            <button type="button" data-value="maxima">Máxima</button>
+          </div>
+          <p class="note">Expresso: ~3× mais rápido (sem o passo de nitidez). Máxima: mais detalhe e a expressão do vídeo no rosto novo, bem mais lento.</p>
+        </div>
       </div>
       <div id="swap-options" class="field" hidden>
         <label class="check">

@@ -8,8 +8,10 @@
 #                (imagem e video rapido), o melhorador de prompt e o 14B, em GGUF Q4 (GPUs
 #                gratuitas: Kaggle, Colab, Lightning AI). Numa placa de 24 GB ou mais o Animate
 #                vem em fp8, que e o que a qualidade "ultra" da troca de pessoa usa.
-#                Logo depois do Animate vem o FLUX.2 Klein, da troca de rosto numa foto (19 GB).
-#                Com SO_TROCA=1, so as duas trocas: 46 GB em vez de 102.
+#                Logo depois do Animate vem a troca de rosto numa foto (FLUX.2 Klein, 19 GB). Com
+#                SO_TROCA=1, so as trocas: 46 GB em vez de 102.
+#                No Kaggle o teto de disco (DISK_BUDGET_GB) deixa o ultimo item, o 14B texto -> video,
+#                de fora da sessao completa.
 #
 #   PHASE=all|core|extras|models
 #                           core vai ate o 5B ficar pronto; extras baixa o resto (MODELS=free);
@@ -24,6 +26,11 @@
 #                           CUDA 13 o ComfyUI liga os nucleos otimizados dele (comfy-kitchen), que
 #                           e o que faz um modelo em INT8 render; pede driver NVIDIA 580 ou mais novo
 #   ANIMATE_INT8=1          baixa tambem o Animate em INT8 (17 GB), para medir contra o GGUF
+#   SO_ROSTO=1             sessao enxuta so da troca de rosto em video: ComfyUI + FaceFusion, uns
+#                           9 GB em vez de 60 (sem o codificador de texto nem os modelos do Wan).
+#                           Boa para o credito gratuito do Lightning AI. Implica o FaceFusion.
+#   FACEFUSION=1            instala tambem o FaceFusion (2 GB), da troca de rosto num video. Fora
+#                           do Kaggle: la as sessoes com ele foram canceladas pelo proprio Kaggle
 #   PESSOA_INTEIRA=1        baixa tambem o BiRefNet (1 GB), que completa o recorte da pessoa
 #                           (ajuste de teste `whole` da troca de pessoa)
 #   SKIP_APT=1              nao chama o apt-get (a imagem ja traz git, ffmpeg e aria2)
@@ -70,6 +77,7 @@ GGUF_REF="${GGUF_REF:-6ea2651e7df66d7585f6ffee804b20e92fb38b8a}"
 PREPROCESS_REF="${PREPROCESS_REF:-0e0b6a2a555625acf4d4aefb780e27d06937132f}"
 SAM2_REF="${SAM2_REF:-0c35fff5f382803e2310103357b5e985f5437f32}"
 FOREGROUND_REF="${FOREGROUND_REF:-b6561965a70070d9143fd9e558f6ca3c481510db}"
+FACEFUSION_REF="${FACEFUSION_REF:-72470819a0373be3388b3929c8f8f311f418fc3c}"  # FaceFusion 3.9.1: troca de rosto num video
 
 free_gb() { df -BG --output=avail "$STORE" | tail -1 | tr -dc 0-9; }
 
@@ -241,6 +249,27 @@ set_animate() {  # set_animate <gguf|fp8>
   fi
 }
 
+# Troca de rosto num video: o FaceFusion (ao lado do ComfyUI, no mesmo Python) e os modelos que o
+# Wan Studio usa dele (2 GB). Ele baixa os modelos sozinho antes de procurar rostos: uma troca numa
+# imagem sem ninguem deixa todos no lugar. O analisador de conteudo dele (que recusa video
+# improprio) faz parte desses modelos e continua ligado.
+set_facefusion() {
+  local dir="$ROOT/facefusion" probe
+  checkout https://github.com/facefusion/facefusion "$dir" "$FACEFUSION_REF" || return 1
+  "$PY" -c "import onnx" 2>/dev/null || "$PY" -m pip install -q onnx || return 1
+  if [ -f "$dir/.assets/models/hyperswap_1a_256.onnx" ] && [ -f "$dir/.assets/models/gfpgan_1.4.onnx" ]; then
+    echo "ok  FaceFusion"
+    return 0
+  fi
+  probe="$(mktemp -d)"
+  "$PY" -c "import sys, numpy, cv2; cv2.imwrite(sys.argv[1], numpy.full((256, 256, 3), 128, numpy.uint8))" "$probe/vazio.png" || return 1
+  (cd "$dir" && "$PY" facefusion.py headless-run -s "$probe/vazio.png" -t "$probe/vazio.png" -o "$probe/saida.png" \
+     --processors face_swapper face_enhancer --face-swapper-model hyperswap_1a_256 --face-enhancer-model gfpgan_1.4 \
+     --face-mask-types box occlusion --execution-providers cpu --log-level error) >/dev/null 2>&1 || true
+  rm -rf "$probe"
+  [ -f "$dir/.assets/models/hyperswap_1a_256.onnx" ] && [ -f "$dir/.assets/models/gfpgan_1.4.onnx" ]
+}
+
 # Troca de rosto numa foto: FLUX.2 Klein 9B (GGUF Q8), o codificador de texto dele (Qwen3 8B), o
 # VAE do FLUX.2 e a LoRA de troca de cabeca BFS. A deteccao de pose e a do Animate.
 set_klein() {
@@ -390,7 +419,11 @@ core() {
 
 # Os modelos sem os quais o estudio nao abre.
 core_models() {
-  fetch "$W21/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors" text_encoders
+  # A sessao so da troca de rosto em video (SO_ROSTO) nao usa o codificador de texto (so os modos
+  # do Wan): fica so o ComfyUI + o FaceFusion, uns 9 GB em vez de 60 (bom para o credito do Lightning).
+  if [ -z "${SO_ROSTO:-}" ]; then
+    fetch "$W21/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors" text_encoders
+  fi
   case "$MODELS" in
     5b) set_5b ;;
     # free: o estudio abre ja com o codificador de texto; a troca de pessoa, o 5B e o resto
@@ -403,12 +436,29 @@ core_models() {
 # Cada extra e independente: se um download falhar, os outros continuam.
 extras() {
   if [ "$MODELS" != free ]; then return 0; fi
+  # Sessao enxuta so da troca de rosto em video: so o FaceFusion (nada do Wan). ~9 GB no total.
+  if [ -n "${SO_ROSTO:-}" ]; then
+    if have_room 3 "o FaceFusion (troca de rosto em video)"; then
+      note "FaceFusion, troca de rosto em vídeo (2 GB)"
+      set_facefusion || echo "aviso: a instalacao do FaceFusion (troca de rosto em video) falhou" >&2
+    fi
+    rm -f "$LOGS/extras.status"
+    echo "downloads extras concluidos (so a troca de rosto em video)"
+    return 0
+  fi
   local kind need=21
   kind="$(animate_kind)"
   if [ "$kind" = fp8 ]; then need=29; fi
   if have_room "$need" "o Wan 2.2 Animate (troca de pessoa)"; then
     note "Wan 2.2 Animate, troca de pessoa ($(( need - 1 )) GB)"
     set_animate "$kind" || echo "aviso: o download do Animate falhou" >&2
+  fi
+  # A troca de rosto em video (FaceFusion) so com FACEFUSION=1: em 16/10/2026 as tres sessoes do
+  # Kaggle que o instalavam foram canceladas pelo proprio Kaggle poucos minutos depois de subir
+  # (o Colab, tambem do Google, proibe ferramentas de deepfake). Fica para uma GPU que permita.
+  if [ -n "${FACEFUSION:-}" ] && have_room 3 "o FaceFusion (troca de rosto em video)"; then
+    note "FaceFusion, troca de rosto em vídeo (2 GB)"
+    set_facefusion || echo "aviso: a instalacao do FaceFusion (troca de rosto em video) falhou" >&2
   fi
   if have_room 20 "o FLUX.2 Klein (troca de rosto)"; then
     note "FLUX.2 Klein, troca de rosto (19 GB)"

@@ -425,9 +425,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   let swapNodes = await lastGraph();
   let swapTypes = swapNodes.map((node) => node.class_type);
   const animate = swapNodes.find((node) => node.class_type === "WanAnimateToVideo").inputs;
-  check("T6 grafo: um pedaco de 45 quadros (todos os 16 por segundo) com deteccao e SAM2, sem interpolacao, 4 passos, quadros em PNG", ["LoadVideo", "PoseAndFaceDetection", "WanStudioPersonMask", "ImageCompositeMasked", "SaveImage"].every((type) => swapTypes.includes(type))
+  check("T6 grafo: um pedaco de 45 quadros (todos os 16 por segundo) com deteccao e SAM2, sem interpolacao, 3 passos, quadros em PNG", ["LoadVideo", "PoseAndFaceDetection", "WanStudioPersonMask", "ImageCompositeMasked", "SaveImage"].every((type) => swapTypes.includes(type))
     && !swapTypes.includes("SaveVideo") && !swapTypes.includes("FrameInterpolate") && animate.length === 45 && animate.width === 832 && animate.height === 480 && !("continue_motion" in animate)
-    && swapNodes.find((node) => node.class_type === "KSampler").inputs.steps === 4, `length=${animate.length} ${animate.width}x${animate.height}`);
+    && swapNodes.find((node) => node.class_type === "KSampler").inputs.steps === 3, `length=${animate.length} ${animate.width}x${animate.height}`);
   await page.uncheck("#replace");
   await page.click("#submit");
   await page.waitForFunction(() => document.querySelectorAll(".card video").length === 6, null, { timeout: 120000 });
@@ -440,7 +440,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   check("T8 Reusar restaura modo, pessoa, video e opcoes", await page.evaluate(() => state.mode === "swap" && files.start_image instanceof File
     && files.video instanceof File && !document.querySelector("#replace").checked && state.length === "5" && state.quality === "boa"));
 
-  // ---- T9. video longo: pedacos encadeados do comeco para o fim, um de cada vez
+  // ---- T9. video longo: duas cadeias avancam ao mesmo tempo, uma em cada GPU (padrao com 2 GPUs)
   const graphsBefore = [(await graphsOf(8188)).length, (await graphsOf(8189)).length];
   await page.check("#replace");
   await page.setInputFiles('[data-frame="video"] input', `${TESTS}/long.mp4`);
@@ -461,9 +461,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const graphsAfter = [await graphsOf(8188), await graphsOf(8189)];
   const longPieces = [...graphsAfter[0].slice(graphsBefore[0]), ...graphsAfter[1].slice(graphsBefore[1])]
     .map((graph) => graph.find((node) => node.class_type === "WanAnimateToVideo").inputs);
-  check("T9 troca de 10 s: 3 pedacos em fila (77, 77 e 17 quadros), um de partida e 2 continuando, emendados em 10 s",
+  check("T9 troca de 10 s: 3 pedacos em duas cadeias (uma por GPU), cada cadeia com seu pedaco de partida, emendados em 10 s",
     /qualidade rápida · 832×480 · 10 s · pessoa trocada/.test(longMeta) && Math.abs(longResult.duracao - 10) < 0.1 && longPieces.length === 3
-    && longPieces.map((piece) => piece.length).sort((a, b) => a - b).join() === "17,77,77"
+    && longPieces.map((piece) => piece.length).sort((a, b) => a - b).join() === "53,57,77"
     && longPieces.filter((piece) => "continue_motion" in piece).length === 2 && longPieces.every((piece) => piece.width === 640 && piece.height === 368),
     `${longMeta} | ${longWait} | ${graphsAfter[0].length - graphsBefore[0]} + ${graphsAfter[1].length - graphsBefore[1]} pedacos`);
 
@@ -503,6 +503,46 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     && faceGraph.filter((item) => item.class_type === "LoadImage").length === 2, `${faceMeta} | ${JSON.stringify(pasteNode && pasteNode.inputs)}`);
   await shot("06e-trocar-rosto");
 
+  // ---- V. trocar rosto num video (FaceFusion): a mesma aba, com "Video" no lugar de "Foto"
+  await page.click('[data-key="target"] [data-value="video"]');
+  const videoUi = await page.evaluate(() => {
+    const hidden = (selector) => document.querySelector(selector).hidden;
+    return {
+      video: !hidden('[data-frame="video"]') && document.querySelector('[data-frame="video"] .drop-title').textContent,
+      semFotoDaPessoa: hidden('[data-frame="end_image"]'), semCabelo: hidden("#hair-row"),
+      trecho: !hidden('[data-key="length"]') && !hidden("#start-field") && hidden('[data-key="duration"]'),
+      semQuantidade: hidden("#count-field"), modelo: document.querySelector("#swap-model span").textContent,
+      nota: document.querySelector("#face-note").textContent, qualidade: !hidden("#face-quality-row"),
+    };
+  });
+  check("V1 trocar rosto num video: a foto do rosto e o video, o trecho (inicio e duracao), a qualidade, sem a opcao do cabelo nem lote, pelo FaceFusion",
+    videoUi.video === "Vídeo da pessoa que recebe o rosto" && videoUi.semFotoDaPessoa && videoUi.semCabelo && videoUi.trecho
+    && videoUi.semQuantidade && videoUi.modelo === "FaceFusion" && videoUi.nota.includes("quadro a quadro")
+    && videoUi.qualidade, JSON.stringify(videoUi));
+  check("V1b sem os modelos do FaceFusion: avisa e trava o botao", await page.isVisible("#mode-note") && await page.isDisabled("#submit"),
+    await text("#mode-note"));
+  await fetch("http://127.0.0.1:8188/_install", { method: "POST", body: JSON.stringify({ set: "faceswap" }) });
+  await page.waitForFunction(() => document.querySelector("#mode-note").hidden, null, { timeout: 40000 });
+  await page.evaluate(() => setFrame("video", null));
+  await page.click("#submit");
+  check("V2 sem o video avisa", (await text("#error")).includes("vídeo da pessoa"));
+  await page.setInputFiles('[data-frame="video"] input', `${TESTS}/sample.mp4`);
+  await page.click('[data-key="length"] [data-value="5"]');
+  await page.click('[data-key="faceQuality"] [data-value="maxima"]');
+  const videosBefore = await count(".card video");
+  await page.click("#submit");
+  await page.waitForFunction((n) => document.querySelectorAll(".card video").length >= n + 1, videosBefore, { timeout: 90000 });
+  const videoMeta = await text(".card-meta");
+  const videoGraph = [...(await graphsOf(8188)), ...(await graphsOf(8189))]
+    .filter((graph) => graph.some((item) => item.class_type === "WanStudioFaceFusion")).pop() || [];
+  const fusion = videoGraph.find((item) => item.class_type === "WanStudioFaceFusion");
+  check("V3 troca de rosto num video na qualidade maxima: um video do trecho, feito pelo FaceFusion (1024, com expressao) num no so",
+    /FaceFusion · troca de rosto em vídeo · 832×480 · 3 s · qualidade máxima · seed \d+/.test(videoMeta)
+    && fusion && fusion.inputs.swapper === "hyperswap_1a_256" && fusion.inputs.pixel_boost === "1024x1024"
+    && fusion.inputs.expression === true && videoGraph.length === 2, `${videoMeta} | ${JSON.stringify(fusion && fusion.inputs)}`);
+  await shot("06f-trocar-rosto-video");
+  await page.click('[data-key="target"] [data-value="foto"]');
+
   // ---- J. descoberta automatica: sem a conexao salva, acha a sessao pelo anuncio cifrado
   await page.evaluate(() => localStorage.removeItem("wan-conn"));
   await page.reload();
@@ -513,6 +553,29 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await page.waitForFunction(() => document.querySelector("#status").dataset.state === "ok", null, { timeout: 45000 });
   } catch { discovered = false; }
   check("J1 conectou sozinho pelo anuncio (ntfy.sh real)", discovered, await text("#status"));
+
+  // O endereco anunciado nao responde daqui (o tunel do Cloudflare dava 530 no Brasil em 16/10/2026):
+  // o site avisa a sessao, cifrado, no topico de avisos, para ela abrir outro tunel.
+  const report = await page.evaluate(async () => {
+    UNREACHABLE_AFTER = 1500;
+    const saved = conn;
+    conn = { url: "http://127.0.0.1:9", password: "x" };  // nada ouve nesta porta
+    await refreshStatus();
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    await refreshStatus();
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const response = await fetch(`${NTFY}/${pairing.topic}-avisos/json?poll=1&since=2m`);
+    const messages = (await response.text()).split(String.fromCharCode(10)).filter(Boolean).map((line) => JSON.parse(line))
+      .filter((entry) => entry.event === "message");
+    const last = messages.length ? await decrypt(messages[messages.length - 1].message, pairing.key) : null;
+    conn = saved;
+    unreachable = { url: null, since: 0, reported: false };
+    UNREACHABLE_AFTER = 45000;
+    await refreshStatus();
+    return last;
+  });
+  check("J2 sem alcancar o endereco anunciado, o site avisa a sessao (cifrado, no topico de avisos, ntfy.sh real)",
+    Boolean(report) && report.t === "inacessivel" && report.u === "http://127.0.0.1:9", JSON.stringify(report));
 
   // ---- K. excluir pede confirmacao
   const before = await count(".card");

@@ -29,7 +29,8 @@ PORT = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else 
 FIELDS = {"UNETLoader": "unet_name", "UnetLoaderGGUF": "unet_name", "LoraLoaderModelOnly": "lora_name",
           "VAELoader": "vae_name", "CLIPLoader": "clip_name", "CLIPVisionLoader": "clip_name",
           "OnnxDetectionModelLoader": "vitpose_model", "UpscaleModelLoader": "model_name",
-          "FrameInterpolationModelLoader": "model_name", "WanStudioForegroundLoader": "model"}
+          "FrameInterpolationModelLoader": "model_name", "WanStudioForegroundLoader": "model",
+          "WanStudioFaceFusion": "swapper"}
 INSTALLED = {
     "UNETLoader": ["wan2.2_ti2v_5B_fp16.safetensors"],
     "UnetLoaderGGUF": [],
@@ -41,6 +42,7 @@ INSTALLED = {
     "UpscaleModelLoader": [],
     "FrameInterpolationModelLoader": [],
     "WanStudioForegroundLoader": [],
+    "WanStudioFaceFusion": [],
 }
 # Nos de pacotes extras: existem desde o inicio (sao instalados antes de o ComfyUI subir);
 # o que chega depois sao os arquivos de modelo.
@@ -74,6 +76,8 @@ EXTRA_SETS = {
         "LoraLoaderModelOnly": ["bfs_head_v1_flux-klein_9b_step3750_rank64.safetensors"],
         "OnnxDetectionModelLoader": ["vitpose-l-wholebody.onnx", "yolov10m.onnx"],
     },
+    # A troca de rosto num video: os modelos de troca que o FaceFusion tem baixados.
+    "faceswap": {"WanStudioFaceFusion": ["hyperswap_1a_256"]},
     # O mesmo modelo sem compressao GGUF: o que o instalador baixa numa placa de 24 GB ou mais.
     "animate_fp8": {"UNETLoader": ["Wan2_2-Animate-14B_fp8_e4m3fn_scaled_KJ.safetensors"]},
     "14b_i2v": {
@@ -113,6 +117,8 @@ state = {"interrupt": None}
 
 def sampler_steps(node, graph=None):
     inputs = node["inputs"]
+    if node["class_type"] == "WanStudioFaceFusion":  # o FaceFusion informa o andamento em milesimos
+        return 5
     if node["class_type"] == "SamplerCustomAdvanced":  # os passos estao no no das sigmas
         return (graph or {}).get(str(inputs["sigmas"][0]), {}).get("inputs", {}).get("steps", 3)
     if node["class_type"] == "KSampler":
@@ -176,7 +182,7 @@ async def execute(pid, graph, client_id):
             # confundir os dois (foi um defeito de verdade na primeira troca de pessoa).
             outputs[node_id] = {"images": [{"filename": node["inputs"]["file"], "subfolder": "", "type": "input"}],
                                 "animated": [True]}
-        elif node["class_type"] == "SaveVideo":
+        elif node["class_type"] in ("SaveVideo", "WanStudioFaceFusion"):
             outputs[node_id] = {"images": [{"filename": f"{prefix}_00001_.mp4", "subfolder": "wanstudio", "type": "output"}],
                                 "animated": [True]}
         elif node["class_type"] == "SaveImage":

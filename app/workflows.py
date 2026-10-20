@@ -82,6 +82,13 @@ CATALOG = {
                   "CFGGuider", "KSamplerSelect", "RandomNoise", "SamplerCustomAdvanced",
                   "WanStudioHeadCrop", "WanStudioHeadPaste"),
     },
+    # FaceFusion: troca o rosto da pessoa de um video (modo "face" com um video). Os modelos ficam
+    # na pasta do proprio FaceFusion; o no do Wan Studio lista os de troca que encontra la.
+    "faceswap": {
+        "turbo": {},
+        "extra": {"faceswap": ("faceswap", "hyperswap_1a_256")},
+        "nodes": ("WanStudioFaceFusion",),
+    },
 }
 
 # O 5B trabalha em multiplos de 32 e 24 fps; o 14B em multiplos de 16 e 16 fps.
@@ -129,10 +136,11 @@ SWAP_OVERLAP = 5       # quadros que um pedaco copia do vizinho para continuar d
 SWAP_MIDDLE = 0
 # Em quantas cadeias de pedacos o video e gerado quando ha mais de uma GPU: 1 (so avancando, o
 # que foi medido) ou 2 (duas que avancam ao mesmo tempo, uma em cada GPU; a segunda parte de
-# quadros ja gerados do primeiro pedaco: app/stitch.py `chains`). Pelo plano, um video de 23 s
-# cai a uns 57% do tempo. O 2 so vira padrao depois de conferido na GPU: falta ver se a emenda
-# entre as cadeias aparece.
-SWAP_CHAINS = 1
+# quadros ja gerados do primeiro pedaco: app/stitch.py `chains`). Medido na GPU do Kaggle (2x T4,
+# 20/10/2026): um video de 10 s caiu de 12,5 para 9,1 min (1,37x; em videos longos o ganho e
+# maior), e a emenda entre as cadeias nao aparece (os quadros do meio ficam iguais aos de uma
+# cadeia so). Por isso o padrao com 2 GPUs passou a ser 2.
+SWAP_CHAINS = 2
 SWAP_MIN_FRAMES = 17
 SWAP_MAX_SECONDS = 60
 # A LoRA lightx2v foi destilada para 4 passos. "rapida" gera com 59% dos pixels (metade do
@@ -144,10 +152,13 @@ SWAP_MAX_SECONDS = 60
 # `fps` e quantos quadros por segundo o modelo gera, e `out_fps` os do arquivo. Quando o
 # segundo e multiplo do primeiro, os que faltam sao calculados a partir dos vizinhos
 # (interpolacao); nenhuma qualidade usa isso hoje, so os ajustes de teste.
+# "rapida" e "boa" geram em 3 passos (medido na GPU do Kaggle em 20/10/2026: 3 passos ficaram
+# iguais a 4 na imagem e ~1,25x mais rapidos; i_q4 7,1 min vs p_3passos 5,7 min). "maxima" e
+# "ultra", que priorizam o detalhe, seguem com mais passos.
 SWAP_QUALITIES = {
-    "rapida": {"steps": 4, "fps": 16, "out_fps": 16,
+    "rapida": {"steps": 3, "fps": 16, "out_fps": 16,
                "sizes": {"16:9": (640, 368), "9:16": (368, 640), "1:1": (480, 480)}},
-    "boa": {"steps": 4, "fps": 16, "out_fps": 16, "sizes": SIZES["14b"]["480p"]},
+    "boa": {"steps": 3, "fps": 16, "out_fps": 16, "sizes": SIZES["14b"]["480p"]},
     "maxima": {"steps": 4, "fps": 16, "out_fps": 16, "chunk": 49,
                "sizes": {"16:9": (1024, 576), "9:16": (576, 1024), "1:1": (768, 768)}},
     # So em placas de 24 GB ou mais (`min_vram`, em GB): gera direto em 720p, com os 6 passos
@@ -212,6 +223,8 @@ def required_set(model, mode):
     """Qual conjunto de arquivos (chave de CATALOG) o job precisa."""
     if mode == "face" and model == "klein":
         return "klein"
+    if mode == "face" and model == "facefusion":
+        return "faceswap"
     if mode in ("swap", "face"):
         return "animate"
     if model == "5b":
@@ -248,7 +261,7 @@ def available(installed):
     nodes = set(installed.get("nodes", ()))
     result = {}
     for set_name, entry in CATALOG.items():
-        files = {"clip": encoder, "vae": find("vae", entry["vae"])}
+        files = {"clip": encoder, **({"vae": find("vae", entry["vae"])} if "vae" in entry else {})}
         for role in ("unet", "high", "low"):
             if role in entry:
                 files[role] = find_unet(entry[role])
@@ -299,7 +312,7 @@ def resolve(params, has_start, has_end, has_video=False):
     if mode == "swap":
         return _resolve_swap(params, has_start, has_video)
     if mode == "face":
-        return _resolve_face(params, has_start, has_end)
+        return _resolve_face(params, has_start, has_end, has_video)
 
     model = params.get("model", "5b")
     if model not in SIZES:
@@ -492,15 +505,40 @@ KLEIN_NEGATIVE = ("bad quality, noise, blurry, worst quality, low resolution, bl
                   "cartoon, illustration, painting")
 FACE_IMAGE_SIZE = 768
 FACE_FRAMES = 5
+# Num video (`target` = "video"), quem troca o rosto e o FaceFusion, quadro a quadro, no tamanho
+# e na velocidade do video (ate FACE_VIDEO_SIDE no lado maior e FACE_VIDEO_FPS quadros por
+# segundo): vm/nodes/wan_studio, WanStudioFaceFusion. O corpo, o cabelo, a roupa, o movimento e o
+# som ficam os do video.
+FACE_VIDEO_SIDE = 1920
+FACE_VIDEO_FPS = 30
+FACE_VIDEO_SWAPPER = "hyperswap_1a_256"
+FACE_VIDEO_ENHANCER = "gfpgan_1.4"
+FACE_VIDEO_BOOST = "512x512"
+# A qualidade da troca de rosto num video: quanto maior o "pixel boost", em mais pedaços o rosto
+# é refeito (mais nítido, mais lento), e cada melhorador recupera o detalhe de um jeito. "máxima"
+# custa bem mais tempo de GPU. O restaurador de expressão (live_portrait) leva a expressão da
+# pessoa do vídeo para o rosto novo, quadro a quadro: fica mais natural, mas pede outro modelo.
+# "expresso" pula o melhorador de nitidez (um passo que roda em todo quadro e quase dobra o
+# tempo): medido numa GTX 1050 Ti, fica ~3x mais rápido que "boa". "boa" e "maxima" priorizam a
+# qualidade.
+FACE_VIDEO_QUALITIES = {
+    "expresso": {"boost": "256x256", "enhancer": "nenhum", "expression": False},
+    "boa": {"boost": "512x512", "enhancer": "gfpgan_1.4", "expression": False},
+    "maxima": {"boost": "1024x1024", "enhancer": "codeformer", "expression": True},
+}
 
 
-def _resolve_face(params, has_face, has_body):
+def _resolve_face(params, has_face, has_body, has_video=False):
     if not has_face:
         raise ValueError("envie a imagem do rosto")
-    if not has_body:
-        raise ValueError("envie a imagem da pessoa que vai receber o rosto")
     expert = params.get("expert") if isinstance(params.get("expert"), dict) else {}
     bad = "ajuste de teste inválido"
+    if params.get("target", "foto") not in ("foto", "video"):
+        raise ValueError("destino da troca de rosto inválido")
+    if params.get("target") == "video":
+        return _resolve_face_video(params, expert, has_video)
+    if not has_body:
+        raise ValueError("envie a imagem da pessoa que vai receber o rosto")
     if expert.get("onnx", "gpu") not in ("cpu", "gpu"):
         raise ValueError(bad)
     engine = expert.get("engine", "klein")
@@ -539,6 +577,47 @@ def _resolve_face(params, has_face, has_body):
         "length": FACE_FRAMES,
         "overlap": SWAP_OVERLAP,
         "fps": SWAP_FPS,
+    }
+
+
+def _resolve_face_video(params, expert, has_video):
+    if not has_video:
+        raise ValueError("envie o vídeo da pessoa que vai receber o rosto")
+    bad = "ajuste de teste inválido"
+    quality = params.get("quality", "boa")
+    if quality not in FACE_VIDEO_QUALITIES:
+        raise ValueError("qualidade inválida")
+    preset = FACE_VIDEO_QUALITIES[quality]
+    swapper = expert.get("swapper", FACE_VIDEO_SWAPPER)
+    enhancer = expert.get("enhancer", preset["enhancer"])
+    boost = expert.get("boost", preset["boost"])
+    faces = expert.get("faces", "one")
+    expression = bool(expert.get("expression", preset["expression"]))
+    if (swapper not in ("hyperswap_1a_256", "hyperswap_1b_256", "hyperswap_1c_256", "alphaface_256", "inswapper_128")
+            or enhancer not in ("gfpgan_1.4", "gpen_bfr_512", "codeformer", "nenhum")
+            or boost not in ("256x256", "512x512", "768x768", "1024x1024") or faces not in ("one", "many")):
+        raise ValueError(bad)
+    return {
+        "mode": "face",
+        "kind": "video",
+        "model": "facefusion",
+        "fast": True,
+        "quality": quality,
+        "swapper": swapper,
+        "enhancer": enhancer,
+        "boost": boost,
+        "faces": faces,
+        "expression": expression,
+        "seconds": _number(params, "duration", 10.0, 1, SWAP_MAX_SECONDS, "duração inválida"),
+        "start": _number(params, "start", 0.0, 0, 24 * 3600, "início do trecho inválido"),
+        "pin": _number(expert, "worker", None, 0, 16, bad, int),
+        # O tamanho, os quadros por segundo e a duracao sao os do video: o servidor os le dele.
+        "width": 0,
+        "height": 0,
+        "fps": 0,
+        "length": 0,
+        "duration": 0,
+        "seed": _seed(params),
     }
 
 
@@ -632,6 +711,8 @@ def build(spec, files, positive, negative, prefix, start_image=None, end_image=N
         return _build_animate(spec, files, positive, negative, prefix, start_image, video, motion)
     if spec["mode"] == "face" and spec["model"] == "klein":
         return _build_face_klein(spec, files, prefix, start_image, end_image)
+    if spec["mode"] == "face" and spec["model"] == "facefusion":
+        return _build_face_video(spec, files, prefix, start_image, video)
     if spec["mode"] == "face":
         return _build_face_image(spec, files, positive, negative, prefix, start_image, end_image)
     builder = _build_5b if spec["model"] == "5b" else _build_14b
@@ -931,6 +1012,18 @@ def _build_face_klein(spec, files, prefix, face_image, body_image):
     save = g.add("SaveImage", images=[pasted, 0], filename_prefix=f"wanstudio/{prefix}")
     g.stage("finalizando", decoded, pasted, save)
     return g.nodes, [sampler], g.stages
+
+
+def _build_face_video(spec, files, prefix, face_image, video):
+    """Trocar rosto num video com o FaceFusion (veja FACE_VIDEO_SIDE). Um no so faz tudo e grava o
+    video com o som; ele e tambem o que informa o andamento. Devolve (grafo, samplers, etapas)."""
+    g = _Graph()
+    face = g.add("LoadImage", image=face_image)
+    swap = g.add("WanStudioFaceFusion", image=[face, 0], video=video, swapper=files["faceswap"],
+                 filename_prefix=f"wanstudio/{prefix}", enhancer=spec["enhancer"], pixel_boost=spec["boost"],
+                 faces=spec["faces"], expression=spec["expression"])
+    g.stage("trocando o rosto", face, swap)
+    return g.nodes, [swap], g.stages
 
 
 def _window_inputs(g, files, frames, width, height, spec, detector=None, motion=None):

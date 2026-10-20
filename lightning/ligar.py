@@ -599,6 +599,10 @@ def boot(auth, base, project, studio_id, persist):
     """Inicia lightning/boot.py solto do comando: ele segue rodando depois que este script sai."""
     env = (f"WAN_IDLE_MINUTES={IDLE_MINUTES} WAN_PERSIST_GB={persist} "
            f"LIGHTNING_CLOUD_PROJECT_ID={project} LIGHTNING_CLOUD_SPACE_ID={studio_id}")
+    # Por padrao a sessao sobe enxuta, so a troca de rosto em video (boot.py); WAN_FULL=1 aqui
+    # traz o estudio inteiro (troca de pessoa, 5B, etc.).
+    if os.environ.get("WAN_FULL"):
+        env += " WAN_FULL=1"
     # setsid tira o processo da sessao do comando; onde ele nao existir, o nohup sozinho serve.
     # O caminho do Python vem dele mesmo: no terminal do Studio (zsh), "python" e um atalho que
     # prepara o ambiente, e `command -v python` devolve o texto do atalho, nao um arquivo.

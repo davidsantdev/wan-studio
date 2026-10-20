@@ -13,7 +13,8 @@ opcional e sem conferencia na GPU): uma segunda passada do Animate so na cabeca,
 
 WanStudioHeadCrop e WanStudioHeadPaste: a troca de rosto numa foto (modo "face"). Recortam a
 cabeca da foto com folga, para o FLUX.2 Klein a refazer com o rosto da outra foto, e a poem de
-volta no lugar. Estao no fim do arquivo.
+volta no lugar. Estao no fim do arquivo, junto de WanStudioFaceFusion: a troca de rosto num
+video, pelo FaceFusion.
 
 WanStudioWindow e WanStudioPaste: a "janela na pessoa" (`window` na troca de pessoa, tambem
 opcional e ainda sem conferencia na GPU). O primeiro recorta do pedaco o retangulo em que a
@@ -52,6 +53,9 @@ testada no mesmo dia e saiu: num close ela cobria o quadro quase todo, e o cenar
 """
 
 import copy
+import os
+import re
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -1229,11 +1233,213 @@ class WanStudioHeadPaste:
         return (torch.from_numpy(result)[None],)
 
 
+# ---------------------------------------------------------------- troca de rosto num video
+#
+# O modo "face" com um video (Trocar rosto > Video): o rosto da foto entra na pessoa do video,
+# quadro a quadro, pelo FaceFusion (github.com/facefusion/facefusion, na versao fixada em
+# vm/setup.sh, instalado ao lado do ComfyUI): acha o rosto em cada quadro, troca (hyperswap, com
+# "pixel boost": o rosto e trocado em pedacos de 256 px de um quadro de 512), protege o que esta
+# na frente do rosto (maos, cabelo) e o restaura (GFPGAN). O resto do quadro, o movimento e o som
+# ficam os do video. Ele roda como outro processo, na GPU deste ComfyUI, depois de o ComfyUI
+# soltar os modelos dele. O analisador de conteudo do proprio FaceFusion (que recusa video
+# improprio) continua ligado.
+
+FACEFUSION_SWAPPERS = ("hyperswap_1a_256", "hyperswap_1b_256", "hyperswap_1c_256", "alphaface_256", "inswapper_128")
+FACEFUSION_ENHANCERS = ("gfpgan_1.4", "gpen_bfr_512", "codeformer", "nenhum")
+FACEFUSION_BOOSTS = ("256x256", "512x512", "768x768", "1024x1024")
+# Quanto do andamento cada etapa do FaceFusion vale (inicio, fim).
+FACEFUSION_STAGES = {"analysing": (0.0, 0.05), "extracting": (0.05, 0.12), "processing": (0.12, 0.93),
+                     "merging": (0.93, 1.0)}
+FACEFUSION_BAR = re.compile(r"(analysing|extracting|processing|merging):\s*\d+%\|[^|]*\|\s*(\d+)/(\d+)")
+# O que o FaceFusion escreve quando para, e o que o usuario le no card.
+FACEFUSION_ERRORS = (("no source face detected", "não encontrei um rosto na foto do rosto (de frente funciona melhor)"),
+                     ("choose a video for the target", "o vídeo enviado não pôde ser lido"),
+                     ("merging video failed", "não consegui montar o vídeo final"),
+                     ("extracting frames failed", "não consegui ler os quadros do vídeo"))
+
+
+def facefusion_home():
+    """Onde o FaceFusion esta instalado: WAN_FACEFUSION, ou a pasta facefusion ao lado do ComfyUI."""
+    import folder_paths
+    return Path(os.environ.get("WAN_FACEFUSION") or Path(folder_paths.base_path).parent / "facefusion")
+
+
+def installed_swappers(home):
+    """Os modelos de troca que o FaceFusion ja tem baixados, na ordem de FACEFUSION_SWAPPERS."""
+    models = Path(home) / ".assets" / "models"
+    return [name for name in FACEFUSION_SWAPPERS if (models / f"{name}.onnx").is_file()]
+
+
+def facefusion_progress(line):
+    """O andamento (de 0 a 1) que uma linha de progresso do FaceFusion indica, ou None."""
+    match = FACEFUSION_BAR.search(line)
+    if not match:
+        return None
+    start, end = FACEFUSION_STAGES[match.group(1)]
+    return start + (end - start) * min(1.0, int(match.group(2)) / max(1, int(match.group(3))))
+
+
+# A região do rosto que a máscara segue: a pele e os traços, sem a testa/cabelo nem o fundo. Com
+# ela (mais a oclusão), a troca mistura no contorno do rosto, sem a emenda retangular da caixa.
+FACEFUSION_REGIONS = ("skin", "left-eyebrow", "right-eyebrow", "left-eye", "right-eye", "nose",
+                      "mouth", "upper-lip", "lower-lip")
+
+
+def facefusion_command(python, face, video, output, temp, swapper, enhancer="gfpgan_1.4", boost="512x512",
+                       faces="one", expression=False, cuda=True, threads=8):
+    """O comando do FaceFusion para trocar o rosto de `face` na pessoa do video `video`. `face`
+    pode ser um caminho ou uma lista de caminhos (varias fotos do mesmo rosto melhoram a
+    semelhanca; o FaceFusion junta as faces).
+
+    Ajustes de qualidade (ponto de venda): a mascara segue o contorno do rosto (box + oclusao +
+    regiao) em vez de um retangulo; o detector yolo_face e o marcador de pontos 2dfan4; e o
+    melhorador entra a 80% (face_enhancer_blend) para nao deixar o rosto plastico.
+
+    `expression`: alem de trocar o rosto, leva a expressao da pessoa do video para o rosto novo,
+    quadro a quadro (live_portrait). A ordem dos processadores importa: troca, expressao, nitidez."""
+    sources = [face] if isinstance(face, (str, bytes, os.PathLike)) else list(face)
+    processors = ["face_swapper"] + (["expression_restorer"] if expression else []) \
+        + ([] if enhancer == "nenhum" else ["face_enhancer"])
+    command = [python, "facefusion.py", "headless-run", "-s", *map(str, sources), "-t", str(video),
+               "-o", str(output), "--temp-path", str(temp),
+               "--processors", *processors, "--face-swapper-model", swapper, "--face-swapper-pixel-boost", boost,
+               "--face-selector-mode", faces, "--face-detector-model", "yolo_face", "--face-detector-score", "0.5",
+               "--face-landmarker-model", "2dfan4",
+               "--face-mask-types", "box", "occlusion", "region", "--face-mask-regions", *FACEFUSION_REGIONS,
+               "--face-mask-blur", "0.3", "--output-video-quality", "95",
+               "--execution-providers", "cuda" if cuda else "cpu",
+               "--execution-thread-count", str(threads), "--log-level", "info"]
+    if enhancer != "nenhum":
+        command += ["--face-enhancer-model", enhancer, "--face-enhancer-blend", "80"]
+    return command
+
+
+def facefusion_error(lines):
+    """A mensagem para o usuario a partir do fim do registro do FaceFusion."""
+    text = "\n".join(lines).lower()
+    for marker, message in FACEFUSION_ERRORS:
+        if marker in text:
+            return message
+    last = next((line for line in reversed(lines) if line.strip() and not FACEFUSION_BAR.search(line)), "")
+    return "o FaceFusion não conseguiu trocar o rosto" + (f": {last.strip()[:200]}" if last else "")
+
+
+class WanStudioFaceFusion:
+    """Troca o rosto da pessoa de um video pelo da foto, com o FaceFusion, e grava o video (com o
+    som do original) na pasta de saida."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        found = installed_swappers(facefusion_home())
+        return {"required": {
+            "image": ("IMAGE", {"tooltip": "A foto do rosto."}),
+            "video": ("STRING", {"default": "", "tooltip": "O video, ja enviado a pasta input do ComfyUI."}),
+            "swapper": (found or ["(FaceFusion sem modelos)"],),
+            "filename_prefix": ("STRING", {"default": "wanstudio/rosto"}),
+        }, "optional": {
+            "enhancer": (list(FACEFUSION_ENHANCERS), {"default": FACEFUSION_ENHANCERS[0]}),
+            "pixel_boost": (list(FACEFUSION_BOOSTS), {"default": "512x512"}),
+            "faces": (["one", "many"], {"default": "one", "tooltip": "one: so o rosto maior de cada quadro; many: todos."}),
+            "expression": ("BOOLEAN", {"default": False,
+                                       "tooltip": "Leva a expressao da pessoa do video para o rosto novo (live_portrait)."}),
+        }}
+
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "swap"
+    CATEGORY = "Wan Studio"
+    DESCRIPTION = "Troca o rosto da pessoa de um video pelo da foto (FaceFusion)."
+
+    def swap(self, image, video, swapper, filename_prefix, enhancer=FACEFUSION_ENHANCERS[0], pixel_boost="512x512",
+             faces="one", expression=False):
+        import queue
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import threading
+        from collections import deque
+
+        import folder_paths
+        from PIL import Image
+
+        home = facefusion_home()
+        if swapper not in installed_swappers(home):
+            raise ValueError("o FaceFusion não está instalado nesta GPU")
+        target = folder_paths.get_annotated_filepath(video)
+        subfolder, prefix = os.path.split(filename_prefix)
+        folder = os.path.join(folder_paths.get_output_directory(), subfolder)
+        os.makedirs(folder, exist_ok=True)
+        name = f"{prefix}_00001_{os.path.splitext(target)[1] or '.mp4'}"
+        output = os.path.join(folder, name)
+        work = tempfile.mkdtemp(prefix="facefusion_", dir=folder_paths.get_temp_directory())
+        face = os.path.join(work, "rosto.png")
+        Image.fromarray((image[0, :, :, :3].clamp(0, 1).cpu().numpy() * 255).round().astype(np.uint8)).save(face)
+        mm.unload_all_models()  # a GPU fica para o FaceFusion
+        mm.soft_empty_cache()
+        cuda = torch.cuda.is_available()
+        command = facefusion_command(sys.executable, face, target, output, work, swapper, enhancer, pixel_boost, faces,
+                                     expression=expression, cuda=cuda,
+                                     threads=4 if cuda else max(1, os.cpu_count() or 1))
+        print(f"[wan_studio] FaceFusion: {swapper}, {enhancer}, {pixel_boost}"
+              + (", expressão" if expression else "") + f", {'GPU' if cuda else 'CPU'}", flush=True)
+        process = subprocess.Popen(command, cwd=str(home), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        lines = queue.Queue()
+
+        def read():  # o tqdm reescreve a linha com \r: cada pedaco entre \r ou \n e uma linha
+            pending = b""
+            while True:
+                chunk = process.stdout.read1(4096) if hasattr(process.stdout, "read1") else process.stdout.read(4096)
+                if not chunk:
+                    break
+                pending += chunk
+                parts = re.split(rb"[\r\n]", pending)
+                pending = parts.pop()
+                for part in parts:
+                    lines.put(part.decode("utf-8", "replace"))
+            if pending:
+                lines.put(pending.decode("utf-8", "replace"))
+            lines.put(None)
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        bar, tail, shown = ProgressBar(1000), deque(maxlen=40), -1
+        try:
+            while True:
+                if mm.processing_interrupted():
+                    process.kill()
+                    mm.throw_exception_if_processing_interrupted()
+                try:
+                    line = lines.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
+                if not line.strip():
+                    continue
+                tail.append(line)
+                progress = facefusion_progress(line)
+                if progress is None:
+                    print(f"[facefusion] {line}", flush=True)
+                elif int(progress * 1000) != shown:
+                    shown = int(progress * 1000)
+                    bar.update_absolute(shown)
+            code = process.wait()
+        finally:
+            if process.poll() is None:
+                process.kill()
+            shutil.rmtree(work, ignore_errors=True)
+        if code != 0 or not os.path.isfile(output):
+            raise RuntimeError(facefusion_error(list(tail)))
+        return {"ui": {"images": [{"filename": name, "subfolder": subfolder, "type": "output"}], "animated": (True,)}}
+
+
 NODE_CLASS_MAPPINGS = {"WanStudioPersonMask": WanStudioPersonMask, "WanStudioFitReference": WanStudioFitReference,
                        "WanStudioWindow": WanStudioWindow, "WanStudioPaste": WanStudioPaste,
                        "WanStudioForegroundLoader": WanStudioForegroundLoader, "WanStudioWholePerson": WanStudioWholePerson,
                        "WanStudioHeadWindow": WanStudioHeadWindow, "WanStudioFacePaste": WanStudioFacePaste,
-                       "WanStudioHeadCrop": WanStudioHeadCrop, "WanStudioHeadPaste": WanStudioHeadPaste}
+                       "WanStudioHeadCrop": WanStudioHeadCrop, "WanStudioHeadPaste": WanStudioHeadPaste,
+                       "WanStudioFaceFusion": WanStudioFaceFusion}
 NODE_DISPLAY_NAME_MAPPINGS = {"WanStudioPersonMask": "Wan Studio: máscara da pessoa",
                               "WanStudioFitReference": "Wan Studio: enquadrar a imagem da pessoa",
                               "WanStudioWindow": "Wan Studio: janela na pessoa",
@@ -1243,4 +1449,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {"WanStudioPersonMask": "Wan Studio: máscara da pe
                               "WanStudioHeadWindow": "Wan Studio: a cabeça ampliada",
                               "WanStudioFacePaste": "Wan Studio: colar a cabeça refeita",
                               "WanStudioHeadCrop": "Wan Studio: a cabeça numa foto",
-                              "WanStudioHeadPaste": "Wan Studio: colar a cabeça na foto"}
+                              "WanStudioHeadPaste": "Wan Studio: colar a cabeça na foto",
+                              "WanStudioFaceFusion": "Wan Studio: trocar o rosto num vídeo (FaceFusion)"}

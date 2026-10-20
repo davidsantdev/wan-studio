@@ -14,7 +14,7 @@ O site é o mesmo nas duas, e acha sozinho a que estiver ligada.
 
 O foco é a **troca de pessoa**: o site abre nela, ela é a primeira aba e os modelos dela são os
 primeiros a chegar na sessão. Ao lado ficam o **Trocar rosto** (o rosto de uma foto na pessoa de
-outra foto) e os outros modos do estúdio: imagem, texto → vídeo, imagem → vídeo.
+outra foto ou de um vídeo) e os outros modos do estúdio: imagem, texto → vídeo, imagem → vídeo.
 
 ```
  SITE (endereço fixo)                          GPU GRATUITA (só enquanto você usa)
@@ -160,6 +160,13 @@ troca de pessoa ganha a qualidade **Ultra** (720p direto). Dois cliques em
 **Ligar GPU (Lightning)**: ele mostra o saldo, pergunta a placa, liga a máquina, envia o Wan
 Studio para ela e abre o mesmo site, já pareado. O Kaggle continua valendo para rascunhos.
 
+> **Por padrão, no Lightning a sessão sobe enxuta, só com a troca de rosto em vídeo** (ComfyUI +
+> FaceFusion, uns 9 GB em vez de 60): é o que o Kaggle proíbe e o que cabe bem no crédito grátis,
+> e numa L4 roda rápido e aguenta a qualidade Máxima. O site abre direto na aba **Trocar rosto**.
+> Para subir o estúdio inteiro (troca de pessoa, 5B, etc.), defina `WAN_FULL=1` antes de ligar
+> (no PowerShell: `$env:WAN_FULL = "1"; python lightning\ligar.py`). Use apenas imagens e vídeos
+> de pessoas que autorizaram.
+
 > **Estado em 12/10/2026: não é gratuito de verdade, e ficou de lado.** Numa conta nova, real,
 > o Lightning deu **5 créditos, uma vez só**, sem renovação marcada (mais 25 só cadastrando
 > cartão), e 10 GB de disco guardado. Com a L40S a 2,14 créditos por hora na nuvem mais barata,
@@ -229,7 +236,7 @@ para elas e o site só com as duas): `python free\build.py --so-troca` e **Ligar
 | Recurso | Como funciona |
 |---|---|
 | Trocar pessoa | Põe a pessoa de uma imagem no lugar da pessoa de um vídeo de até 60 s (Wan 2.2 Animate) |
-| Trocar rosto | Põe o rosto de uma foto na pessoa de outra foto, que fica com o corpo, a roupa, a expressão e o cenário dela (FLUX.2 Klein 9B com a LoRA BFS) |
+| Trocar rosto | Põe o rosto de uma foto na pessoa de outra foto (FLUX.2 Klein 9B com a LoRA BFS) ou na pessoa de um vídeo de até 60 s (FaceFusion); o corpo, a roupa, a expressão, o cenário e, no vídeo, o movimento e o som continuam os dela |
 | Texto → Vídeo | Wan 2.2 5B (24 fps) ou 14B (16 fps), 3 ou 5 segundos, 480p ou 720p |
 | Imagem → Vídeo | Anima uma imagem enviada; a proporção acompanha a imagem |
 | Início + Fim | Gera a transição entre duas imagens (precisa do 14B) |
@@ -320,9 +327,11 @@ vezes mais rápido e bem pior: a pessoa saía com objetos inventados, o cabelo d
 original e a cor estourada. As medidas estão em *O que foi verificado*. Hoje a segunda GPU
 serve para um segundo vídeo na fila e para a restauração da alta definição.
 
-### Trocar o rosto de uma foto
+### Trocar o rosto de uma foto ou de um vídeo
 
-Na aba **Trocar rosto**, envie duas fotos: a do **rosto** e a da **pessoa que recebe o rosto**. O
+Na aba **Trocar rosto**, escolha **Foto** ou **Vídeo**.
+
+**Numa foto**, envie duas fotos: a do **rosto** e a da **pessoa que recebe o rosto**. O
 resultado é a segunda foto, do mesmo tamanho, com a cabeça da primeira: o corpo, a roupa, a
 pose, a expressão e o cenário continuam os dela. **Levar o cabelo junto** vem marcado (a cabeça
 inteira, com o cabelo, vem da primeira foto); desmarcado, só o rosto é trocado e fica o cabelo
@@ -349,6 +358,47 @@ alternativa para vender) e a LoRA BFS é MIT.
 > Animate (um modelo de vídeo) refazendo só o rosto; no primeiro teste numa GPU, em 15/10/2026,
 > o resultado ficou muito ruim, e ela foi trocada pelo Klein. A antiga continua como ajuste de
 > teste (`{"engine": "animate"}`), para comparar.
+
+**Num vídeo**, envie a foto do **rosto** e o **vídeo da pessoa que recebe o rosto**, e escolha o
+trecho (até 60 s, como na troca de pessoa). Sai o vídeo inteiro, no tamanho e na velocidade do
+original (até 1920 px e 30 quadros por segundo), com o som: só o rosto muda; o corpo, o cabelo, a
+roupa e o movimento continuam os do vídeo.
+
+> **Não vem na GPU gratuita do Kaggle.** Em 16/10/2026 as três sessões do Kaggle que instalavam o
+> FaceFusion foram canceladas pelo próprio Kaggle poucos minutos depois de subir, sem erro
+> nenhum do Wan Studio; a sessão sem ele fica ligada normalmente. O Colab, também do Google,
+> proíbe ferramentas de deepfake. Por isso o instalador só o põe com `FACEFUSION=1`, numa GPU
+> cujas regras permitam, e na GPU gratuita a opção Vídeo avisa que não está instalada.
+
+Quem troca é o **FaceFusion** 3.9.1 ([facefusion/facefusion](https://github.com/facefusion/facefusion)),
+quadro a quadro: acha o rosto em cada quadro (detector yolo_face, pontos 2dfan4), troca pelo da
+foto (modelo hyperswap) e mistura só na **região do rosto** — a máscara segue o contorno (pele e
+traços) e a oclusão, em vez de um retângulo, então não há emenda visível; o que passa na frente
+(mão, cabelo) é respeitado. Por fim restaura o detalhe sem deixar o rosto plástico (o melhorador
+entra a 80%). É muito mais rápido que a troca de pessoa, porque não gera o quadro inteiro. O
+analisador de conteúdo do próprio FaceFusion continua ligado: ele recusa vídeo impróprio. O
+FaceFusion (2 GB, com os modelos) é instalado logo depois do Animate, quando pedido (`FACEFUSION=1`).
+
+O FaceFusion também aceita **várias fotos do mesmo rosto** (ângulos e luzes diferentes) como
+referência média, o que deixa o resultado mais parecido — no uso local, basta pôr todas na pasta
+de entrada.
+
+Há três qualidades: **Expresso** refaz o rosto em 256 px e pula o passo de nitidez — é **~3×
+mais rápido** que a Boa (medido numa GTX 1050 Ti) e, no olhar normal, quase igual. **Boa** refaz
+em 512 px e melhora a nitidez com o GFPGAN. **Máxima** refaz em 1024 px, usa o CodeFormer e ainda
+leva a expressão da pessoa do vídeo para o rosto novo (live_portrait), o que deixa o movimento do
+rosto mais natural; custa bem mais tempo de GPU. (O passo de nitidez roda em todo quadro e quase
+dobra o tempo; por isso o Expresso, sem ele, corre tanto.)
+
+![Troca de rosto num vídeo: em cima o original, embaixo o resultado](<exemplos/troca de rosto em video - teste na CPU (em cima o original, embaixo o resultado).jpg>)
+
+> **Estado em 16/10/2026: rodado de ponta a ponta aqui, na CPU, nunca numa GPU.** Num trecho de
+> 3 s do vídeo de exemplo (48 quadros, 640 × 640) com o rosto da foto de `exemplos/`, o FaceFusion
+> levou 278 s na CPU deste computador; o rosto saiu parecido com o da foto, com a luz da cena e a
+> mão na frente da testa preservada (imagem acima e
+> `exemplos/troca de rosto em video - de perto (a foto, o original e o resultado).jpg`). Na GPU
+> deve levar uma fração disso, mas ainda não foi medido. Licenças: o FaceFusion é OpenRAIL-AS e o
+> modelo hyperswap, ResearchRAIL; para vender, confira os termos.
 
 Use apenas imagens de pessoas que autorizaram o uso.
 
@@ -392,11 +442,16 @@ diálogo da GPU mostra o que está baixando.
 | Ordem | Item | Tamanho | Libera |
 |---|---|---|---|
 | 1 | Wan 2.2 Animate (GGUF Q4) + detecção, recorte, interpolação e restauração | 20 GB | Trocar pessoa |
-| 2 | FLUX.2 Klein 9B (GGUF Q8) + codificador de texto + LoRA BFS | 19 GB | Trocar rosto |
-| 3 | Wan 2.2 5B + turbo | 12 GB | Imagem, Texto → Vídeo, Imagem → Vídeo |
-| 4 | Melhorador de prompt | 8 GB | Melhorar com IA (só com 2 GPUs, como no Kaggle) |
-| 5 | Wan 2.2 14B imagem → vídeo (GGUF Q4) | 18 GB | Início + Fim e Imagem → Vídeo no 14B |
-| 6 | Wan 2.2 14B texto → vídeo (GGUF Q4) | 18 GB | Texto → Vídeo e Imagem no 14B |
+| 2 | FaceFusion 3.9.1 + modelos de troca, restauração e análise (só com `FACEFUSION=1`, fora do Kaggle) | 2 GB | Trocar rosto num vídeo |
+| 3 | FLUX.2 Klein 9B (GGUF Q8) + codificador de texto + LoRA BFS | 19 GB | Trocar rosto numa foto |
+| 4 | Wan 2.2 5B + turbo | 12 GB | Imagem, Texto → Vídeo, Imagem → Vídeo |
+| 5 | Melhorador de prompt | 8 GB | Melhorar com IA (só com 2 GPUs, como no Kaggle) |
+| 6 | Wan 2.2 14B imagem → vídeo (GGUF Q4) | 18 GB | Início + Fim e Imagem → Vídeo no 14B |
+| 7 | Wan 2.2 14B texto → vídeo (GGUF Q4) | 18 GB | Texto → Vídeo e Imagem no 14B (fora do Kaggle) |
+
+No Kaggle a sessão para de gravar perto de 90 GB (o Kaggle trava acima disso), e o instalador
+tem um teto de 88 GB: com a troca de rosto numa foto, o último item, o 14B texto → vídeo, fica de fora.
+Texto → vídeo e imagem continuam no 5B.
 
 Assim que a troca de pessoa é instalada, as duas GPUs a carregam de antemão (uns 5 minutos,
 sem ninguém pedir): o que mais demora na primeira troca de uma sessão é ler os modelos do
@@ -680,19 +735,33 @@ Outras medidas do dia:
 - **O site aberto levava os resultados dos testes** para a galeria do navegador; os testes de
   `tests/gpu_real.py` passaram a usar a fila que o site não enxerga, como a produção.
 
-### Em teste, ainda sem conferência na GPU (13/10/2026)
+### Medido na GPU e adotado (20/10/2026)
+
+Na GPU do Kaggle (2× T4) ficou confirmado o que mais acelera a troca de pessoa, sem piorar a
+imagem — e virou **padrão**:
+
+- **As duas GPUs em paralelo (`chains=2`, padrão quando há 2 GPUs).** Antes os pedaços saíam um
+  depois do outro numa GPU só. Agora duas cadeias avançam juntas, uma em cada GPU (a segunda
+  começa perto do meio e herda a aparência da primeira pela *âncora*; na emenda, os quadros se
+  fundem). Medido: um vídeo de 10 s caiu de **12,5 para 9,1 min** (1,37×; num vídeo longo o ganho
+  é maior). A emenda do meio não aparece — os quadros ficam iguais aos de uma cadeia só.
+- **3 passos em vez de 4, nas qualidades Rápida e Boa.** Medido: **7,1 → 5,7 min** (1,25×), com a
+  pessoa igual à de 4 passos. A Máxima e a Ultra, que priorizam o detalhe, seguem com 4 e 6.
+
+Juntando os dois, uma sessão do Kaggle fica ~1,7× mais rápida num vídeo curto, e mais num longo.
+
+### Em teste, ainda sem conferência na GPU
 
 O que está no código, desligado por padrão, porque este projeto só adota o que foi medido na
-GPU (veja *Por que a troca de pessoa tinha piorado*). Nada disto foi gerado ainda: a cota da
-semana no Kaggle acabou no dia em que foi escrito, e a GPU rápida ainda não tinha conta.
+GPU (veja *Por que a troca de pessoa tinha piorado*).
 
 | Ajuste | O que faz | Como testar | O que olhar |
 |---|---|---|---|
-| `chains=2` | **Duas cadeias de pedaços, uma em cada GPU do Kaggle.** Hoje os pedaços saem um depois do outro numa GPU e a outra fica parada. A primeira cadeia começa no primeiro quadro; a segunda começa perto do meio e, para herdar a aparência, recebe quadros já gerados do primeiro pedaço (a *âncora*). Na emenda entre as duas, os quadros que ambas geraram se fundem. Pelo plano, o vídeo de 23 s cai a 57% do tempo | `python tests\gpu_real.py juntos c_base c_duas c_livre` | o tempo; e os quadros em volta da emenda (`python tests\gpu_real.py quadros c_duas 92 106`): se a pessoa muda de um quadro para o outro, e se a segunda cadeia inventou algo, como fazia o pedaço do meio de 12/10 |
-| `chains=2`, `anchor=false` | O mesmo, com a segunda cadeia partindo só da imagem da pessoa: as duas GPUs começam juntas e o tempo cai a perto da metade, mas nada liga a aparência de uma cadeia à da outra | o `c_livre` acima | o mesmo, com mais atenção a cabelo e roupa de um lado e do outro da emenda |
+| `chains=2`, `anchor=false` | As duas cadeias partindo só da imagem da pessoa (sem a âncora): começam juntas, mas nada liga a aparência de uma à da outra | `python tests\gpu_real.py bateria c_livre` | cabelo e roupa de um lado e do outro da emenda |
 | `ref=crop` | Recorta a imagem da pessoa na caixa dela (pose + detector), na proporção do vídeo, antes de ela entrar no Animate. Hoje a imagem inteira entra com faixas pretas, e a pessoa fica pequena quando a proporção difere | `python tests\gpu_real.py juntos troca_vertical troca_vertical_crop` | o gorro e a roupa do personagem de corpo inteiro, que se perdiam com a imagem quadrada num vídeo em pé |
 | `box=larga`, `grow=16` | Caixa mais folgada em volta da pose e contorno mais engordado no recorte do SAM2 | `python tests\gpu_real.py juntos r_larga_rapida r_base_rapida` | se a trança da pessoa original ainda volta nos últimos segundos, e se o modelo inventou algo |
 | `unet=int8` | **O Animate em INT8** (o arquivo oficial da Comfy-Org, 17 GB) em vez do GGUF Q4. O ComfyUI fixado aqui (0.39) tem núcleos próprios para INT8, que só ligam com o PyTorch de CUDA 13; num relato com uma T4 e outro modelo, o INT8 rendeu 1,3 vez o fp8. Pela tabela de quem publicou o formato, a qualidade fica acima da do fp8 (e portanto do Q4) | gere o notebook com `python free\build.py --env TORCH_INDEX=cu130 --env ANIMATE_INT8=1`, ligue, e `python tests\gpu_real.py juntos i_q4 i_int8` | no registro (`log comfyui` e `log comfyui1`): o driver da placa (o CUDA 13 pede o 580 ou mais novo; com um mais antigo o instalador avisa e mantém o PyTorch da imagem, e aí o INT8 não rende), os segundos por passo de cada um e quanto do modelo ficou fora da placa (17 GB não cabem inteiros numa T4); e os quadros lado a lado |
+| Trocar rosto num vídeo (FaceFusion, já no site) | **O rosto de uma foto na pessoa de um vídeo**, quadro a quadro. Rodou de ponta a ponta na CPU daqui; falta o tempo e a qualidade na GPU | `python tests\gpu_real.py bateria v_rosto` | se o rosto se parece com o da foto em todo o vídeo, se treme de um quadro para o outro, se a borda aparece quando a pessoa vira, e o tempo |
 | Trocar rosto (FLUX.2 Klein, já no site) | **O rosto de uma foto na pessoa de outra foto** (veja *Trocar o rosto de uma foto*). A versão com o Animate ficou muito ruim no teste do usuário; esta é a que a comunidade aponta como a melhor | `python tests\gpu_real.py juntos r_foto r_foto_rosto` (e `r_foto_animate`, a antiga, para comparar) | se o rosto se parece com o da foto de referência, se a expressão é a da segunda foto, se a borda em volta do rosto aparece e se o resto da imagem ficou igual |
 | `whole=true` | **A pessoa inteira.** O recorte do SAM2 é completado pelo de um modelo de recorte de primeiro plano (BiRefNet-portrait, licença MIT), só com os pedaços que saem da cabeça (cabelo, tranças, chapéu) e são pequenos perto da pessoa. No exemplo de 10 s da pasta `exemplos`, do meio para o fim, as tranças da pessoa original voltam grudadas na pessoa nova; rodado aqui nos quadros desse exemplo, o BiRefNet as pega em todos. Em fotos com várias pessoas ele junta quem está encostado e o que a pessoa segura (os bastões de um esquiador): por isso só entra o que sai da cabeça | gere o notebook com `python free\build.py --env PESSOA_INTEIRA=1`, ligue, e `python tests\gpu_real.py juntos w_base w_inteira` | se as tranças somem do meio para o fim (`quadros w_inteira 90 148`) e, no registro, quanto o recorte cresceu (`[wan_studio] pessoa inteira: ...`) |
 | `face=true` | **O rosto em detalhe.** Depois de gerar cada pedaço, uma segunda passada do Animate só na cabeça, ampliada até 3 vezes, com a cabeça da foto da pessoa como referência; o resultado volta para o lugar. Num plano aberto o rosto gerado em 480p tem de 60 a 90 px, e é aí que a semelhança com a foto se perde. Custa de 25 a 55% a mais de tempo quando roda; num close, com o rosto já grande, ela não roda | `python tests\gpu_real.py juntos f_base f_rosto` | se o rosto do `f_rosto` se parece mais com a foto, se a cabeça casa com o pescoço e o cabelo em volta, e o tempo de cada um |
@@ -708,9 +777,6 @@ em `app/workflows.py` (`SWAP_CHAINS`, `SWAP_WINDOW`, `SWAP_WHOLE`, `SWAP_FACE`, 
 `tests/padrao_troca.json` (o resumo do grafo padrão, que os testes conferem) e rode
 `python free\build.py`.
 
-Fora da tabela, por ser só um número: **3 passos em vez de 4** (`python tests\gpu_real.py juntos
-i_q4 p_3passos`). A LoRA foi destilada para 4; com 3 o pedaço levaria um quarto a menos, se a
-pessoa não perder detalhe.
 
 ### No ComfyUI de verdade, sem GPU (13/10/2026)
 
@@ -742,24 +808,26 @@ do começo ao fim, não que o vídeo presta nem quanto tempo leva.
   duração, cada quadro vindo do pedaço certo (com e sem quadros interpolados), cor igualada,
   corte de cena; e as duas cadeias: o plano para qualquer duração, a mistura na emenda entre
   elas e a cor de uma trazida à da outra.
-- **Motor**: 50 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
+- **Motor**: 52 verificações pela API com duas GPUs simuladas: pedaços em fila do começo ao
   fim (o padrão) e, por ajuste de teste, nas duas GPUs a partir do meio, em duas cadeias
   (com e sem âncora), com a janela na pessoa, a pessoa inteira ou o rosto em detalhe; a troca
   de rosto numa foto pelo Klein (com e sem o cabelo; sem a segunda foto, recusada dizendo qual
-  falta) e, como ajuste de teste, pelo Animate; a
+  falta) e, como ajuste de teste, pelo Animate; a troca de rosto num vídeo (o trecho pedido sobe
+  no tamanho e na velocidade do vídeo, com o som, e volta um vídeo); a
   sessão só de troca avisando o site; vídeo longo,
   aquecimento, alta definição em fase separada, cancelamento no meio, falta de memória,
   melhorador cedendo a GPU; e, com uma placa de 45 GB simulada, a qualidade *Ultra* (recusada
   na T4; 720p direto, pedaços de 77 quadros e modelo fp8 na placa grande).
-- **Site e servidor**: 99 verificações num Chrome real contra um ComfyUI simulado: parear,
+- **Site e servidor**: 103 verificações num Chrome real contra um ComfyUI simulado: parear,
   conectar, gerar, trocar pessoa, fila, cancelar, erro, galeria persistente, Animar, Continuar,
   celular, desligar, e a *Ultra* aparecendo só na placa grande; o botão de ligar a GPU rápida
   (com a chave aceita e recusada), o tempo estimado em cada qualidade, a comparação com o
   vídeo original; a troca de rosto (o formulário das duas fotos, o aviso enquanto o Klein
-  não chegou e quando falta uma foto, e o grafo do Klein); e a ordem das abas: na primeira visita o site abre na troca
+  não chegou e quando falta uma foto, e o grafo do Klein) e a troca de rosto num vídeo (a escolha
+  Foto | Vídeo, o trecho, o aviso sem o FaceFusion e o vídeo pronto); e a ordem das abas: na primeira visita o site abre na troca
   de pessoa, a primeira aba, com os outros modos ao lado; numa sessão só de troca ficam só as
   abas das duas trocas, e as outras voltam numa sessão inteira.
-- **Recorte**: 65 verificações da parte dos nós do ComfyUI que é só conta: o fechamento do
+- **Recorte**: 67 verificações da parte dos nós do ComfyUI que é só conta: o fechamento do
   recorte da pessoa (cortada pela borda, bolsões, corpo inteiro intacto, as duas pistas por
   quadro-chave), o recorte da imagem da pessoa na proporção do vídeo (`ref=crop`), a janela
   na pessoa (o tamanho dela em cada tipo de cena, a colagem de volta no vídeo, a cor trazida à
@@ -769,7 +837,9 @@ do começo ao fim, não que o vídeo presta nem quanto tempo leva.
   janela em volta da cabeça ou a foto inteira num close, o tamanho em que ela é refeita, a
   colagem de volta com a cor igualada pela borda e sem degrau, só o rosto quando o cabelo fica,
   a foto de costas recusada por não ter rosto à vista; os dois nós também rodaram aqui com o
-  PyTorch de verdade numa foto). O SAM2, a detecção e o BiRefNet
+  PyTorch de verdade numa foto) e a troca de rosto num vídeo (o andamento lido das barras do
+  FaceFusion, o comando, as mensagens de erro em português; o nó também rodou aqui com o
+  FaceFusion de verdade, na CPU, num trecho do vídeo de exemplo). O SAM2, a detecção e o BiRefNet
   em si só se conferem na GPU (o BiRefNet foi rodado aqui, na CPU, nos quadros do exemplo e em
   quatro fotos).
 - **O grafo padrão não mudou**: sem ajuste de teste nenhum, o grafo de cada pedaço da troca
@@ -780,7 +850,7 @@ do começo ao fim, não que o vídeo presta nem quanto tempo leva.
   simulados: pastas criadas e explicadas, dois vídeos em pé produzidos com um ilegível no
   meio, saída em 1080×1920 a 30 quadros por segundo com o som, vídeos de origem arquivados,
   fila separada da do site, retomada depois de interrompido, desligamento no fim.
-- **Ligar GPU (Lightning)**: 45 verificações contra uma API do Lightning AI simulada, com as
+- **Ligar GPU (Lightning)**: 46 verificações contra uma API do Lightning AI simulada, com as
   rotas e os campos do cliente oficial (lightning-sdk 2026.10.1): criar o Studio, escolher a
   placa pelo que a conta oferece, ligar, enviar o pacote (os comandos remotos rodam de verdade
   num bash local: o pacote chega inteiro e um pedaço perdido é barrado pela conferência),

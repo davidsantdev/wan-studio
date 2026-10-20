@@ -7,6 +7,7 @@ funcoes de numpy sao chamadas. O SAM2 em si so se confere na GPU (tests/gpu_real
 """
 import importlib.util
 import sys
+import tempfile
 import types
 from pathlib import Path
 
@@ -555,6 +556,93 @@ def main():
           and np.abs(result[60:140, 60:65] - frame[60:140, 60:65]).max() < 0.02, str(fix))
     edge, _ = node.photo_pasted(frame, piece, 0, 0)
     only, _ = node.photo_pasted(frame, piece, 50, 50, face=(100.0, 100.0, 12.0, 15.0))
+    # ---- Trocar rosto num video (FaceFusion): o andamento, o comando, as mensagens e o grafo.
+    steps = [node.facefusion_progress(line) for line in (
+        "analysing:  50%|=====     | 24/48 [00:05<00:05,  4.6frame/s, rate=0]",
+        "processing:   0%|          | 0/48 [00:00<?, ?frame/s, execution_providers=['cuda']]",
+        "processing:  50%|=====     | 24/48 [00:03<00:03,  8.0frame/s, execution_providers=['cuda']]",
+        "merging: 100%|==========| 48/48 [00:01<00:00, 40.1frame/s]",
+        "[FACEFUSION.CORE] processing step 1 of 1",
+        "downloading:  45%|====      | 75.3M/166M [00:33<00:51, 1.87MB/s]")]
+    command = node.facefusion_command("py", "rosto.png", "video.mp4", "saida.mp4", "tmp", "hyperswap_1a_256")
+    plain = node.facefusion_command("py", "r.png", "v.mp4", "s.mp4", "t", "inswapper_128", enhancer="nenhum", cuda=False)
+    with tempfile.TemporaryDirectory() as home:
+        models = Path(home) / ".assets" / "models"
+        models.mkdir(parents=True)
+        (models / "hyperswap_1a_256.onnx").write_bytes(b"x")
+        (models / "gfpgan_1.4.onnx").write_bytes(b"x")
+        found = node.installed_swappers(home)
+    multi = node.facefusion_command("py", ["r1.png", "r2.png"], "v.mp4", "s.mp4", "t", "hyperswap_1a_256")
+    fontes = multi[multi.index("-s") + 1:multi.index("-t")]
+    check("V1 troca de rosto num video: o andamento pelas barras do FaceFusion, o comando com a mascara que segue o "
+          "rosto (box+oclusao+regiao), o marcador 2dfan4, o melhorador a 80%, varias fotos do rosto, e os modelos instalados",
+          abs(steps[0] - 0.025) < 1e-6 and abs(steps[1] - 0.12) < 1e-6 and 0.5 < steps[2] < 0.55 and steps[3] == 1.0
+          and steps[4] is None and steps[5] is None
+          and command[1:3] == ["facefusion.py", "headless-run"] and command[command.index("-t") + 1] == "video.mp4"
+          and command[command.index("--processors") + 1:command.index("--processors") + 3] == ["face_swapper", "face_enhancer"]
+          and command[command.index("--face-swapper-pixel-boost") + 1] == "512x512"
+          and command[command.index("--face-mask-types") + 1:command.index("--face-mask-types") + 4] == ["box", "occlusion", "region"]
+          and "--face-mask-regions" in command and "skin" in command
+          and command[command.index("--face-landmarker-model") + 1] == "2dfan4"
+          and command[command.index("--face-enhancer-blend") + 1] == "80" and fontes == ["r1.png", "r2.png"]
+          and command[command.index("--execution-providers") + 1] == "cuda" and "--face-enhancer-model" in command
+          and "face_enhancer" not in plain and "--face-enhancer-model" not in plain
+          and plain[plain.index("--execution-providers") + 1] == "cpu" and found == ["hyperswap_1a_256"], str(steps))
+    messages = [node.facefusion_error(lines) for lines in (
+        ["[FACEFUSION.CORE] no source face detected"], ["[FACEFUSION.FFMPEG] merging video failed"],
+        ["processing: 100%|==========| 48/48", "Traceback ...", "RuntimeError: CUDA failure 2"], [])]
+    spec = workflows.resolve({"mode": "face", "target": "video", "duration": 20, "start": 2}, True, False, True)
+    graph, samplers, _stages = workflows.build(spec, {"faceswap": "hyperswap_1a_256"}, "p", "n", "abc",
+                                               start_image="r.png", video="v.mp4")
+    swap = graph[samplers[0]]["inputs"]
+    refused = []
+    for params in ({"mode": "face", "target": "video"}, {"mode": "face", "target": "outro"},
+                   {"mode": "face", "target": "video", "expert": {"swapper": "outro"}}):
+        try:
+            workflows.resolve(params, True, False, False if params.get("target") == "video" and "expert" not in params else True)
+        except ValueError as error:
+            refused.append(str(error))
+    check("V2 as mensagens do FaceFusion viram texto para o usuario; o pedido num video vai ao FaceFusion com o trecho "
+          "pedido, o rosto da foto e o video, num no so (que tambem informa o andamento)",
+          "foto do rosto" in messages[0] and "montar o vídeo" in messages[1] and "CUDA failure 2" in messages[2]
+          and messages[3].startswith("o FaceFusion")
+          and spec["kind"] == "video" and spec["model"] == "facefusion" and (spec["seconds"], spec["start"]) == (20.0, 2.0)
+          and workflows.required_set(spec["model"], "face") == "faceswap" and len(graph) == 2
+          and graph[samplers[0]]["class_type"] == "WanStudioFaceFusion" and swap["video"] == "v.mp4"
+          and swap["swapper"] == "hyperswap_1a_256" and swap["filename_prefix"] == "wanstudio/abc"
+          and swap["image"][0] in graph and graph[swap["image"][0]]["inputs"]["image"] == "r.png"
+          and len(refused) == 3 and "vídeo" in refused[0], str((messages, refused)))
+    # A qualidade da troca de rosto num video: "maxima" refaz em 1024, com o codeformer e a
+    # expressao da pessoa do video levada ao rosto novo (live_portrait, antes da nitidez).
+    boa = workflows.resolve({"mode": "face", "target": "video"}, True, False, True)
+    maxima = workflows.resolve({"mode": "face", "target": "video", "quality": "maxima"}, True, False, True)
+    swap_max = workflows.build(maxima, {"faceswap": "hyperswap_1a_256"}, "p", "n", "m", start_image="r.png",
+                               video="v.mp4")[0]
+    max_inputs = next(item["inputs"] for item in swap_max.values() if item["class_type"] == "WanStudioFaceFusion")
+    cmd_max = node.facefusion_command("py", "r.png", "v.mp4", "s.mp4", "t", "hyperswap_1a_256", enhancer="codeformer",
+                                      boost="1024x1024", expression=True)
+    procs = cmd_max[cmd_max.index("--processors") + 1:cmd_max.index("--face-swapper-model")]
+    expresso = workflows.resolve({"mode": "face", "target": "video", "quality": "expresso"}, True, False, True)
+    cmd_exp = node.facefusion_command("py", "r.png", "v.mp4", "s.mp4", "t", "hyperswap_1a_256",
+                                      enhancer="nenhum", boost="256x256")
+    procs_exp = cmd_exp[cmd_exp.index("--processors") + 1:cmd_exp.index("--face-swapper-model")]
+    try:
+        workflows.resolve({"mode": "face", "target": "video", "quality": "ruim"}, True, False, True)
+        bad_quality = False
+    except ValueError:
+        bad_quality = True
+    check("V2b a qualidade da troca num video: expresso em 256 e SEM o melhorador (bem mais rápido); boa em 512; maxima em "
+          "1024, com codeformer e a expressao do video (live_portrait); qualidade invalida recusa",
+          expresso["quality"] == "expresso" and expresso["boost"] == "256x256" and expresso["enhancer"] == "nenhum"
+          and procs_exp == ["face_swapper"] and "--face-enhancer-model" not in cmd_exp
+          and boa["quality"] == "boa" and boa["boost"] == "512x512" and boa["expression"] is False
+          and maxima["quality"] == "maxima" and maxima["boost"] == "1024x1024" and maxima["enhancer"] == "codeformer"
+          and maxima["expression"] is True and max_inputs["pixel_boost"] == "1024x1024" and max_inputs["expression"] is True
+          and procs == ["face_swapper", "expression_restorer", "face_enhancer"]
+          and cmd_max[cmd_max.index("--face-swapper-pixel-boost") + 1] == "1024x1024"
+          and cmd_max[cmd_max.index("--face-enhancer-model") + 1] == "codeformer" and bad_quality,
+          str((expresso["boost"], procs_exp, maxima["boost"], procs)))
+
     check("K4 na borda da foto a janela vale ate a beirada; so o rosto: fora da elipse fica o original",
           abs(edge[0, 0, 0] - (piece[0, 0, 0] - 0.05)) < 0.02 and abs(only[100, 100, 0] - 0.85) < 0.02
           and np.abs(only[100, 125] - frame[100, 125]).max() < 1e-6 and np.abs(only[75, 100] - frame[75, 100]).max() < 1e-6)

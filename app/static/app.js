@@ -21,12 +21,23 @@ const DEFAULTS = {
   mode: "swap", camera: "none", effect: "none", style: "none", model: "5b", aspect: "16:9",
   resolution: "480p", duration: "5", count: "1", tab: "camera", filter: "all",
   quality: "boa", length: "5",  // troca de pessoa: qualidade e duracao do trecho
+  target: "foto",  // troca de rosto: numa foto ou num video
+  faceQuality: "boa",  // troca de rosto num video: "boa" ou "maxima"
 };
 const SET_NAMES = {
   "5b": "Wan 2.2 5B", animate: "Wan 2.2 Animate · trocar pessoa", klein: "FLUX.2 Klein · trocar rosto",
+  faceswap: "FaceFusion · trocar rosto em vídeo",
   "14b_i2v": "Wan 2.2 14B · imagem → vídeo", "14b_t2v": "Wan 2.2 14B · texto → vídeo",
 };
-const MODEL_NAMES = { "5b": "Wan 2.2 5B", "14b": "Wan 2.2 14B", animate: "Wan 2.2 Animate", klein: "FLUX.2 Klein" };
+const MODEL_NAMES = {
+  "5b": "Wan 2.2 5B", "14b": "Wan 2.2 14B", animate: "Wan 2.2 Animate", klein: "FLUX.2 Klein", facefusion: "FaceFusion",
+};
+const FACE_NOTES = {
+  foto: "O rosto da primeira foto entra na pessoa da segunda, que fica com o corpo, a roupa, a expressão e o cenário dela. "
+    + "Funciona melhor com os dois rostos de frente e bem iluminados. Use apenas imagens de pessoas que autorizaram.",
+  video: "O rosto da foto entra na pessoa do vídeo, quadro a quadro: o corpo, o cabelo, a roupa, o movimento e o som "
+    + "continuam os do vídeo. Funciona melhor com o rosto de frente e bem iluminado. Use apenas imagens de pessoas que autorizaram.",
+};
 // As trocas (de pessoa e de rosto): os unicos modos de uma sessao so de troca.
 const ANIMATE_MODES = ["swap", "face"];
 const ENHANCER_TEXT = {
@@ -127,6 +138,8 @@ if (store.get("qualities", 1) < 2) {
 // jeito com a GPU desligada.
 let focus = store.get("focus", "all");
 const onlySwap = () => focus === "swap";
+// Sessao enxuta so da troca de rosto em video (Lightning): o site mostra so a aba Trocar rosto.
+const onlyFace = () => focus === "rosto";
 const files = { start_image: null, end_image: null, video: null };
 let presets = { cameras: [], effects: [], styles: [] };
 let conn = store.get("conn");        // { url, password } da sessao atual da GPU
@@ -192,6 +205,37 @@ function api(path, options = {}) {
   if (conn && conn.password) headers.set("Authorization", "Basic " + btoa("wan:" + conn.password));
   const signal = AbortSignal.timeout(options.timeout || FETCH_TIMEOUT);
   return fetch((conn ? conn.url : "") + path, { ...options, headers, signal });
+}
+
+async function encrypt(payload, keyText) {
+  const key = await crypto.subtle.importKey("raw", bytesFromB64(keyText), "AES-GCM", false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key,
+                                                            new TextEncoder().encode(JSON.stringify(payload))));
+  const raw = new Uint8Array(iv.length + sealed.length);
+  raw.set(iv);
+  raw.set(sealed, iv.length);
+  return btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Quando o endereco anunciado nao responde daqui por UNREACHABLE_AFTER, o site avisa a sessao
+// (cifrado, no topico de avisos do pareamento): o tunel pode responder de onde a GPU esta e nao
+// daqui (em 16/10/2026, o do Cloudflare dava 530 no Brasil). A sessao abre outro tunel e anuncia
+// o endereco novo, que a descoberta pega como sempre (free/launcher.py, site_cannot_reach).
+let UNREACHABLE_AFTER = 45000;
+let unreachable = { url: null, since: 0, reported: false };
+
+async function reportUnreachable() {
+  if (!pairing || !conn) return;
+  if (unreachable.url !== conn.url) unreachable = { url: conn.url, since: Date.now(), reported: false };
+  if (unreachable.reported || Date.now() - unreachable.since < UNREACHABLE_AFTER) return;
+  unreachable.reported = true;
+  try {
+    const body = await encrypt({ t: "inacessivel", u: conn.url, ts: Math.floor(Date.now() / 1000) }, pairing.key);
+    await fetch(`${NTFY}/${pairing.topic}-avisos`, { method: "POST", body, signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+  } catch {
+    unreachable.reported = false;  // tenta de novo na proxima falha
+  }
 }
 
 async function decrypt(message, keyText) {
@@ -277,6 +321,7 @@ async function refreshStatus() {
   }
   if (next) {
     failures = 0;
+    unreachable = { url: null, since: 0, reported: false };
     status = next;
     if (next.comfy) store.set("starting", null);  // chegou: nao esta mais "ligando"
     if ((next.focus || "all") !== focus) {
@@ -287,6 +332,7 @@ async function refreshStatus() {
   } else if (++failures >= 2 || !status) {
     status = null;  // uma falha isolada nao derruba a tela; duas seguidas sim
   }
+  if (!next && conn && SITE) reportUnreachable();
   renderStatus();
   refreshForm();
   if ($("#gpu").open) renderGpu();
@@ -354,6 +400,9 @@ function renderGpu() {
     rows.push(...fact("Troca de pessoa", swap.ok ? "pronta" : status.extras ? "baixando" : "não instalada", swap.ok ? "yes" : "no"));
     const face = status.models.klein || {};
     rows.push(...fact("Troca de rosto", face.ok ? "pronta" : status.extras ? "baixando" : "não instalada", face.ok ? "yes" : "no"));
+    const faceVideo = status.models.faceswap || {};
+    rows.push(...fact("Troca de rosto em vídeo", faceVideo.ok ? "pronta" : status.extras ? "baixando" : "não instalada",
+                      faceVideo.ok ? "yes" : "no"));
     rows.push(...fact("Alta definição", swap.hd === "seedvr2" ? "restauração dos detalhes" : swap.hd ? "ampliação" : "indisponível",
                       swap.hd ? "yes" : "no"));
     rows.push(...fact("Movimento fluido", swap.rife ? "pronto" : "indisponível", swap.rife ? "yes" : "no"));
@@ -495,7 +544,7 @@ function nameOf(list, id) {
 }
 
 function neededSet(mode, model) {
-  if (mode === "face") return "klein";
+  if (mode === "face") return state.target === "video" ? "faceswap" : "klein";
   if (mode === "swap") return "animate";
   if (model === "5b") return "5b";
   return mode === "t2v" || mode === "img" ? "14b_t2v" : "14b_i2v";
@@ -571,13 +620,19 @@ function gpuSpeed() {
 }
 
 function refreshForm() {
-  // Numa sessao so de troca de pessoa so as duas trocas aparecem.
-  for (const tab of $$('[data-key="mode"] button')) tab.hidden = onlySwap() && !ANIMATE_MODES.includes(tab.dataset.value);
+  // Numa sessao so de troca de pessoa so as duas trocas aparecem; numa so de troca de rosto em
+  // video (Lightning), so a aba Trocar rosto.
+  for (const tab of $$('[data-key="mode"] button')) {
+    tab.hidden = (onlySwap() && !ANIMATE_MODES.includes(tab.dataset.value)) || (onlyFace() && tab.dataset.value !== "face");
+  }
   if (onlySwap() && !ANIMATE_MODES.includes(state.mode)) choose("mode", "swap");
+  if (onlyFace() && state.mode !== "face") choose("mode", "face");
+  if (onlyFace() && state.target !== "video") choose("target", "video");
   const mode = state.mode;
   const image = mode === "img";
   const swap = mode === "swap";
   const face = mode === "face";
+  const faceVideo = face && state.target === "video";  // troca de rosto num video (FaceFusion)
   $("#form").classList.toggle("swap", swap);  // a ordem dos campos muda (style.css)
 
   let ready;
@@ -596,7 +651,10 @@ function refreshForm() {
   if (!ready) {
     note.textContent = status && status.extras
       ? `Os modelos deste modo ainda estão sendo baixados (${status.extras}).`
-      : "Os modelos deste modo não estão instalados nesta GPU.";
+      : faceVideo
+        ? "A troca de rosto em vídeo não vem instalada na GPU gratuita do Kaggle: ele encerra as sessões que usam "
+          + "o FaceFusion. Ela só funciona numa GPU que permita (veja o README)."
+        : "Os modelos deste modo não estão instalados nesta GPU.";
   }
 
   const info = online() ? status.models[neededSet(mode, state.model)] : null;
@@ -608,20 +666,24 @@ function refreshForm() {
     : "Turbo: 4 passos em vez de 20, bem mais rápido";
 
   $("#frames").hidden = !(mode === "i2v" || mode === "flf" || swap || face);
-  $('[data-frame="end_image"]').hidden = !(mode === "flf" || face);
-  $('[data-frame="video"]').hidden = !swap;
+  $('[data-frame="end_image"]').hidden = !(mode === "flf" || (face && !faceVideo));
+  $('[data-frame="video"]').hidden = !(swap || faceVideo);
+  $('[data-frame="video"] .drop-title').textContent = faceVideo ? "Vídeo da pessoa que recebe o rosto" : "Vídeo";
   $('[data-frame="start_image"] .drop-title').textContent = swap ? "Pessoa" : face ? "Rosto" : "Frame inicial";
   $('[data-frame="end_image"] .drop-title').textContent = face ? "Pessoa que recebe o rosto" : "Frame final";
   $("#swap-options").hidden = !swap;
   $("#swap-note").hidden = !swap;
   $("#face-options").hidden = !face;
+  $("#face-note").textContent = FACE_NOTES[faceVideo ? "video" : "foto"];
+  $("#hair-row").hidden = faceVideo;  // no video o cabelo e sempre o da pessoa do video
+  $("#face-quality-row").hidden = !faceVideo;  // a troca numa foto nao tem escolha de qualidade
   $("#prompt").placeholder = swap || face
     ? "Opcional: descreva a pessoa ou a cena…"
     : "Descreva a cena: quem aparece, onde, o que acontece, a luz…";
 
   // Na troca, tamanho e proporcao vem do video, a duracao vai ate 60 s e nao ha presets nem lote.
-  $('[data-key="duration"]').hidden = swap;
-  $('[data-key="length"]').hidden = !swap;
+  $('[data-key="duration"]').hidden = swap || faceVideo;
+  $('[data-key="length"]').hidden = !(swap || faceVideo);
   $("#resolution-field").hidden = swap;
   // A "ultra" pede uma placa grande; sem ela o botao some e a escolha guardada volta atras.
   const big = online() && (status.vram || 0) >= ULTRA_MIN_VRAM;
@@ -645,15 +707,15 @@ function refreshForm() {
   } else {
     $("#swap-estimate").textContent = "";
   }
-  $("#duration-field").hidden = image || face;
-  $("#start-field").hidden = !swap;
-  $("#count-field").hidden = swap;
+  $("#duration-field").hidden = image || (face && !faceVideo);
+  $("#start-field").hidden = !(swap || faceVideo);
+  $("#count-field").hidden = swap || faceVideo;
   $("#aspect-field").hidden = swap || face;  // na troca de rosto o tamanho e o da segunda foto
   $("#resolution-field").hidden = swap || face;
   $("#presets-field").hidden = swap || face;
   $("#swap-model").hidden = !(swap || face);
-  $("#swap-model span").textContent = face ? "FLUX.2 Klein" : "Wan 2.2 Animate";
-  $("#swap-model small").textContent = face ? "troca de rosto em foto" : "troca de pessoa · 16 fps";
+  $("#swap-model span").textContent = faceVideo ? "FaceFusion" : face ? "FLUX.2 Klein" : "Wan 2.2 Animate";
+  $("#swap-model small").textContent = faceVideo ? "troca de rosto em vídeo" : face ? "troca de rosto em foto" : "troca de pessoa · 16 fps";
   // A troca de rosto segue um pedido fixo (o da LoRA de troca de cabeca): nao ha prompt a escrever.
   $("#prompt-field").hidden = face;
   $("#model-field").hidden = (swap || face) && onlySwap();  // um modelo so: nao ha o que mostrar
@@ -815,11 +877,16 @@ async function submit(event) {
     showError("Envie a imagem da pessoa e o vídeo.");
     return;
   }
-  if (state.mode === "face" && !(files.start_image && files.end_image)) {
+  const faceVideo = state.mode === "face" && state.target === "video";
+  if (faceVideo && !(files.start_image && files.video)) {
+    showError("Envie a foto do rosto e o vídeo da pessoa que vai recebê-lo.");
+    return;
+  }
+  if (state.mode === "face" && !faceVideo && !(files.start_image && files.end_image)) {
     showError("Envie a foto do rosto e a foto da pessoa que vai recebê-lo.");
     return;
   }
-  if (swap && files.video.size > MAX_VIDEO_BYTES) {
+  if ((swap || faceVideo) && files.video.size > MAX_VIDEO_BYTES) {
     showError("O vídeo passa de 100 MB. Corte um trecho menor e envie de novo.");
     return;
   }
@@ -827,7 +894,8 @@ async function submit(event) {
   const seed = $("#seed").value.trim();
   const params = {
     mode: state.mode, model: state.model, aspect: state.aspect, resolution: state.resolution,
-    duration: Number(swap ? state.length : state.duration), quality: state.quality, count: Number(state.count),
+    duration: Number(swap || faceVideo ? state.length : state.duration),
+    quality: faceVideo ? state.faceQuality : state.quality, count: Number(state.count),
     camera: state.mode === "img" ? "none" : state.camera, effect: state.effect, style: state.style,
     prompt, negative: $("#negative").value, fast: $("#fast").checked,
     seed: seed === "" ? null : Number(seed),
@@ -835,10 +903,11 @@ async function submit(event) {
     replace: $("#replace").checked, start: Number($("#start").value) || 0,
     hd: !$("#hd-row").hidden && $("#hd").checked,
     fluid: !$("#fluid-row").hidden && $("#fluid").checked,
-    hair: state.mode === "face" && $("#hair").checked,
+    hair: state.mode === "face" && !faceVideo && $("#hair").checked,
+    target: state.mode === "face" ? state.target : undefined,
   };
   const wanted = { i2v: ["start_image"], flf: ["start_image", "end_image"], swap: ["start_image", "video"],
-                   face: ["start_image", "end_image"] }[state.mode] || [];
+                   face: faceVideo ? ["start_image", "video"] : ["start_image", "end_image"] }[state.mode] || [];
   const inputs = {};
   const body = new FormData();
   body.append("params", JSON.stringify(params));
@@ -1009,7 +1078,12 @@ function describe(job) {
   parts.push(`${job.width}×${job.height}`);
   if (job.kind !== "image") parts.push(`${job.duration} s`);
   if (job.mode === "swap") parts.push(job.replace === false ? "movimento copiado" : "pessoa trocada");
-  if (job.mode === "face") parts.splice(1, 0, job.hair ? "troca de rosto com o cabelo" : "troca de rosto");
+  if (job.mode === "face") {
+    parts.splice(1, 0, job.kind === "video" ? "troca de rosto em vídeo" : job.hair ? "troca de rosto com o cabelo" : "troca de rosto");
+    if (job.kind === "video" && job.quality && job.quality !== "boa") {
+      parts.push(`qualidade ${{ expresso: "expresso", maxima: "máxima" }[job.quality] || job.quality}`);
+    }
+  }
   if (job.hd) parts.push(job.hd_method === "seedvr2" ? "alta definição" : "ampliado");
   if (job.fluid) parts.push(`${job.out_fps} fps`);
   if (job.cost) parts.push(`≈ US$ ${job.cost.toFixed(2)}`);  // tempo de maquina, na GPU paga por tempo
@@ -1037,7 +1111,11 @@ function reuse(item) {
   for (const key of ["mode", "camera", "effect", "style", "model", "aspect", "resolution"]) {
     if (item[key] !== undefined) state[key] = String(item[key]);
   }
-  if (item.mode === "face") $("#hair").checked = Boolean(item.hair);
+  if (item.mode === "face") {
+    $("#hair").checked = Boolean(item.hair);
+    if (item.kind === "video" && item.quality) choose("faceQuality", item.quality);
+    choose("target", item.kind === "video" ? "video" : "foto");
+  }
   if (item.mode === "swap") {
     // A duracao gravada e a real do trecho; volta para a menor opcao que a cobre.
     state.length = String([5, 10, 15, 30, 60].find((option) => option >= item.duration - 0.5) || 60);

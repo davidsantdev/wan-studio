@@ -202,8 +202,8 @@ def scenarios():
           sorted(item["length"] for item in animate) == [21, 37, 37]
           and [item["length"] for item in animate if "continue_motion" not in item] == [21],
           str(sorted((item["length"], "continue_motion" in item) for item in animate)))
-    check("G6 qualidade rapida: 4 passos, gerado em 640x368, com um intermediario entre cada dois quadros",
-          all(node(graph, "KSampler")["steps"] == 4 for graph in every)
+    check("G6 qualidade rapida: 3 passos, gerado em 640x368, com um intermediario entre cada dois quadros",
+          all(node(graph, "KSampler")["steps"] == 3 for graph in every)
           and all((item["width"], item["height"]) == (640, 368) for item in animate)
           and all((node(graph, "FrameInterpolate") or {}).get("multiplier") == 2 for graph in every))
     result = WORK / "resultado.mp4"
@@ -342,6 +342,35 @@ def scenarios():
           and head.get("region") == "rosto" and head.get("always") is True,
           str((code, done and (done["status"], done.get("error")), head.get("region"))))
     call(SERVER + f"/api/jobs/{made.get('id')}", method="DELETE")
+    # ---- trocar rosto num video (FaceFusion): o trecho pedido sobe inteiro, no tamanho e na
+    # velocidade do video, e volta um video
+    before = [len(graphs(base)) for base in FAKES]
+    code, reply = generate({"mode": "face", "target": "video", "duration": 3, "start": 2, "seed": 4},
+                           start_image=person, video=long)
+    video_job = reply["jobs"][0] if code == 200 else {}
+    video_done = wait_job(video_job.get("id"))
+    starts = list(zip(FAKES, before))
+    fresh_video = [(base, graph) for base, start in starts for graph in graphs(base)[start:]]
+    swapped = (node(fresh_video[0][1], "WanStudioFaceFusion") or {}) if fresh_video else {}
+    sent = WORK / "rosto_video_enviado.mp4"
+    if swapped.get("video"):
+        sent.write_bytes(call(f"{fresh_video[0][0]}/view?filename={swapped['video']}&type=input")[1])
+    streams = probe(sent) if sent.exists() else []
+    picture = next((stream for stream in streams if stream.get("codec_type") == "video"), {})
+    check("G12n troca de rosto num video (FaceFusion): o trecho pedido (3 s a 24 fps, no tamanho do video, com o som) "
+          "vai para um no so, e o resultado e um video",
+          code == 200 and bool(video_done) and video_done["status"] == "done" and video_done["kind"] == "video"
+          and video_done["model"] == "facefusion" and (video_done["width"], video_done["height"]) == (640, 360)
+          and video_done["duration"] == 3.0 and len(fresh_video) == 1 and swapped.get("swapper") == "hyperswap_1a_256"
+          and picture.get("nb_read_frames") == "72" and (picture.get("width"), picture.get("height")) == (640, 360)
+          and any(stream.get("codec_type") == "audio" for stream in streams),
+          str((code, video_done and (video_done["status"], video_done.get("error"), video_done.get("duration")),
+               picture.get("nb_read_frames"))))
+    call(SERVER + f"/api/jobs/{video_job.get('id')}", method="DELETE")
+    code, reply = generate({"mode": "face", "target": "video", "seed": 4}, start_image=person)
+    check("G12o troca de rosto num video sem o video: recusada, dizendo o que falta",
+          code == 400 and "vídeo" in str(reply.get("error")), str(reply)[:80])
+
     code, reply = generate({"mode": "face", "seed": 4}, start_image=person)
     check("G12l troca de rosto sem a segunda foto: recusada, dizendo o que falta", code == 400 and "receber o rosto" in str(reply),
           str(reply)[:80])
@@ -490,13 +519,13 @@ def scenarios():
     done = wait_job(made.get("id"), watch=lambda _: together.add(sum(len(get("/queue", base)["queue_running"]) for base in FAKES)))
     fresh = [graph for base, start in zip(FAKES, before) for graph in graphs(base)[start:]]
     pieces = [node(graph, "WanAnimateToVideo") for graph in fresh]
-    check("G19 qualidade boa: 16 quadros por segundo, 4 passos, pedacos de 77, sem pedaco de partida no meio",
+    check("G19 qualidade boa: 16 quadros por segundo, 3 passos, pedacos de 77 (padrao de hoje)",
           code == 200 and (made.get("fps"), made.get("out_fps"), made.get("factor")) == (16, 16, 1) and made.get("chunk") == 77
-          and made.get("chunks") == 3 and made.get("steps") == 4 and (made.get("width"), made.get("height")) == (832, 480),
+          and made.get("chunks") == 3 and made.get("steps") == 3 and (made.get("width"), made.get("height")) == (832, 480),
           str({key: made.get(key) for key in ("fps", "out_fps", "factor", "chunk", "chunks", "steps")}))
-    check("G19a os pedacos saem em fila, um de cada vez: o primeiro sem vizinho, os outros continuando",
-          bool(done) and done["status"] == "done" and sorted(item["length"] for item in pieces) == [17, 77, 77]
-          and sum("continue_motion" not in item for item in pieces) == 1 and max(together, default=0) == 1
+    check("G19a padrao com 2 GPUs: duas cadeias avancam ao mesmo tempo, uma em cada GPU (a 2a parte do meio, com a ancora)",
+          bool(done) and done["status"] == "done" and sorted(item["length"] for item in pieces) == [53, 57, 77]
+          and sum("continue_motion" not in item for item in pieces) == 1 and max(together, default=0) == 2
           and all(node(graph, "FrameInterpolate") is None for graph in fresh),
           f"{sorted(item['length'] for item in pieces)}; ao mesmo tempo: {sorted(together)}")
     check("G19b arquivo: os 160 quadros gerados, a 16 fps", frames_of(done, "boa.mp4") == (160, "16/1"),
@@ -513,7 +542,7 @@ def scenarios():
     asked = reply["jobs"][0] if code == 200 else {}
     call(SERVER + f"/api/jobs/{asked.get('id')}", method="DELETE")
     check("G19c com a alta definicao os pedacos sao de 49 quadros; pedido de teste com outro tamanho e respeitado",
-          (made.get("chunk"), made.get("chunks"), made.get("hd_method")) == (49, 4, "seedvr2") and asked.get("chunk") == 77
+          (made.get("chunk"), made.get("chunks"), made.get("hd_method")) == (49, 5, "seedvr2") and asked.get("chunk") == 77
           and "chunk_asked" not in made, f"{made.get('chunk')} em {made.get('chunks')} pedacos; pedido: {asked.get('chunk')}")
     time.sleep(6)  # os pedacos interrompidos saem das filas
 
@@ -652,7 +681,7 @@ def main():
                f"sine=frequency=330:duration={seconds}", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", WORK / name)
     shared = WORK / "conjuntos.txt"
     procs = [spawn("fake_comfy.py", f"fake{index}.log", "--port", base.rsplit(":", 1)[1], FAKE_ASSETS=str(WORK),
-                   FAKE_SETS="animate,klein,14b_t2v,14b_i2v", FAKE_STEP="0.15", FAKE_SHARED=str(shared))
+                   FAKE_SETS="animate,klein,faceswap,14b_t2v,14b_i2v", FAKE_STEP="0.15", FAKE_SHARED=str(shared))
              for index, base in enumerate(FAKES)]
     procs.append(spawn("run_server_enhancer.py", "server.log", PORT="8093", COMFY_URLS=",".join(FAKES),
                        ENHANCER_WORKER="1", ENHANCER_RETURN_AFTER="2", WAN_MANAGED="1",

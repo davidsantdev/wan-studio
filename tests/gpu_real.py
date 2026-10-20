@@ -236,6 +236,11 @@ TESTS = {
                      {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
     "r_foto_animate": ({"mode": "face", "seed": 21, "hair": True, "expert": {"worker": 1, "engine": "animate"}},
                        {"start_image": "retrato_quadrado.png", "end_image": "video_rosto.png"}),
+    # ---- Trocar rosto num video (FaceFusion, 16/10/2026): o mesmo rosto na mulher do exemplo
+    # oficial, o video inteiro, com o som. O que olhar: se o rosto se parece com o da foto do
+    # comeco ao fim, se treme de um quadro para o outro, se a borda aparece quando ela vira, e o tempo.
+    "v_rosto": ({"mode": "face", "target": "video", "duration": 9.3, "seed": 21, "expert": {"worker": 0}},
+                {"start_image": "retrato_quadrado.png", "video": "video_audio.mp4"}),
     # O caso de uso: a foto de uma pessoa num video em pe de 23 s, na qualidade boa, em duas cadeias.
     "c_humano": ({"mode": "swap", "duration": 23.5, "quality": "boa", "seed": 21, "expert": {"chains": 2}},
                  {"start_image": "retrato_vertical.png", "video": "vertical_30s.mp4"}),

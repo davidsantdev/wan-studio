@@ -60,17 +60,17 @@
   }
  },
  "grafos": {
-  "boa": "501d79c1ea98e209",
-  "boa, continuando": "650ab032935ebc8c",
-  "rapida": "501d79c1ea98e209",
-  "rapida, continuando": "650ab032935ebc8c",
+  "boa": "443925000984ef37",
+  "boa, continuando": "7c218fd524882e4a",
+  "rapida": "443925000984ef37",
+  "rapida, continuando": "7c218fd524882e4a",
   "maxima com alta definicao": "501d79c1ea98e209",
   "maxima com alta definicao, continuando": "650ab032935ebc8c",
-  "boa com movimento fluido": "790d754839aa5734",
-  "boa com movimento fluido, continuando": "a8e901bef285b113",
-  "boa sem manter o cenario": "8b4648c5fb69eb8f",
-  "boa sem manter o cenario, continuando": "ae3aa9a2a1477bd3",
-  "boa com ampliacao simples": "10deee76929f421c",
-  "boa com ampliacao simples, continuando": "9e658de7114595e2"
+  "boa com movimento fluido": "6d908f5ccb44a545",
+  "boa com movimento fluido, continuando": "93f94e4fcc17bb85",
+  "boa sem manter o cenario": "24095db4b6a364a2",
+  "boa sem manter o cenario, continuando": "c1f0f3d0891fb991",
+  "boa com ampliacao simples": "9264aa70effae49a",
+  "boa com ampliacao simples, continuando": "b843f987b4d643d9"
  }
 }

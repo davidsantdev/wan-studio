@@ -562,7 +562,8 @@ boot.launcher.keepalive = lambda: calls.append("keepalive")
 boot.launcher.stop = lambda quiet=False: calls.append("stop")
 boot.LOCK = __import__("pathlib").Path(sys.argv[2]) / "boot.pid"
 code = boot.main()
-print("CHAMADAS", code, ",".join(calls), "ORCAMENTO", os.environ.get("DISK_BUDGET_GB"), "MODELOS", os.environ.get("MODELS_DIR"))
+print("CHAMADAS", code, ",".join(calls), "ORCAMENTO", os.environ.get("DISK_BUDGET_GB"),
+      "MODELOS", os.environ.get("MODELS_DIR"), "ROSTO", os.environ.get("SO_ROSTO"))
 """
 
 
@@ -571,8 +572,10 @@ def boot_scenarios():
     desligamento da maquina no fim."""
     def boot(**env):
         full = environment()
+        # Os testes de disco abaixo são da sessão completa (modelos do Wan, uns 60 GB): WAN_FULL=1
+        # para não cair na sessão enxuta de troca de rosto (uns 9 GB), que tem a sua própria conta.
         full.update(LIGHTNING_CLOUD_PROJECT_ID=PROJECT, LIGHTNING_CLOUD_SPACE_ID=SPACE, WAN_IDLE_MINUTES="20",
-                    WAN_FAILURE_GRACE="0.2", **env)
+                    WAN_FAILURE_GRACE="0.2", WAN_FULL="1", **env)
         result = subprocess.run([sys.executable, "-c", BOOT_PROBE, str(LIGHTNING), str(WORK)], env=full,
                                 capture_output=True, text=True, encoding="utf-8", timeout=120)
         return result.stdout + result.stderr
@@ -593,6 +596,17 @@ def boot_scenarios():
     out = boot(WAN_PERSIST_GB="0", WAN_KEEP_ON="1")
     check("B3 disco da conta desconhecido e pedido para não desligar: teto de 45 GB e a máquina fica ligada",
           "ORCAMENTO 45" in out and not sent("POST", "stop") and "continua ligada" in out, last(out))
+
+    # Sem WAN_FULL, o Lightning sobe a sessão enxuta: só a troca de rosto em vídeo (SO_ROSTO), e
+    # 15 GB da conta já bastam para guardar (não precisa dos 60 da sessão completa).
+    reset(studio=NEBIUS_STUDIO, phase="RUNNING", machine="lit-l4-1")
+    full = environment()
+    full.update(LIGHTNING_CLOUD_PROJECT_ID=PROJECT, LIGHTNING_CLOUD_SPACE_ID=SPACE, WAN_IDLE_MINUTES="20",
+                WAN_FAILURE_GRACE="0.2", WAN_PERSIST_GB="15")
+    out = subprocess.run([sys.executable, "-c", BOOT_PROBE, str(LIGHTNING), str(WORK)], env=full,
+                         capture_output=True, text=True, encoding="utf-8", timeout=120).stdout
+    check("B4 por padrão a sessão é enxuta (só troca de rosto em vídeo): SO_ROSTO ligado e 15 GB da conta já guardam",
+          "ROSTO 1" in out and "ORCAMENTO 15" in out and "guardados entre as sessões" in out, last(out))
 
 
 def main():
