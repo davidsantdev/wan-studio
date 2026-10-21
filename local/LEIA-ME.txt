@@ -1,0 +1,75 @@
+TROCA DE ROSTO EM VÍDEO — AQUI NO SEU PC
+========================================
+
+Troca o rosto de um vídeo pelo rosto de uma foto, na GPU do seu próprio PC, sem
+nuvem e sem pagar nada. A foto é o rosto que entra; o vídeo é a pessoa que recebe
+o rosto (o corpo, a roupa, o movimento e o som continuam os do vídeo).
+
+Funciona em qualquer placa com DirectX 12 (AMD, Intel ou NVIDIA). Sem placa, roda
+na CPU — bem mais lento, mas funciona.
+
+
+PRIMEIRA VEZ (instalar)
+-----------------------
+Precisa do Python (python.org) e do git (git-scm.com) instalados.
+
+  python local/instalar.py
+
+Isso cria a pasta "facefusion-local" ao lado do projeto (uns 2,5 GB: o FaceFusion,
+um Python próprio, os modelos e o ffmpeg). Demora um pouco só nesta primeira vez.
+Pode rodar de novo quando quiser — o que já existe não é baixado outra vez.
+
+Os dois .bat já chamam o instalador sozinhos na primeira vez que você usa.
+
+
+DO JEITO MAIS FÁCIL (dois cliques)
+----------------------------------
+• "Trocar rosto em video.bat"
+    Arraste a foto do rosto E o vídeo para cima deste arquivo. Ou ponha os dois
+    na pasta  facefusion-local\entrada  e dê um duplo clique. O vídeo pronto abre
+    sozinho e fica em  facefusion-local\saida .
+
+• "Abrir Wan Studio local.bat"
+    Abre o site do Wan Studio no navegador (http://127.0.0.1:8080), já na aba
+    "Trocar rosto → Vídeo". Você escolhe a foto, o vídeo, o trecho e a qualidade
+    pela tela, igual à versão da nuvem. Feche a janela preta para desligar.
+    (Só essa aba funciona no PC; as outras precisam da GPU grande da nuvem.)
+
+
+PELA LINHA DE COMANDO (opcional)
+--------------------------------
+  python local/trocar_rosto_video.py                      usa a pasta entrada
+  python local/trocar_rosto_video.py ROSTO.png VIDEO.mp4  usa esses arquivos
+  python local/trocar_rosto_video.py ... --qualidade maxima
+  python local/trocar_rosto_video.py ... --cpu            força a CPU
+
+Pode passar VÁRIAS fotos do mesmo rosto — a semelhança melhora.
+
+
+QUALIDADES
+----------
+  expresso  rápido mesmo: sem o passo de nitidez. ~3x mais rápido que "boa".
+            Ótimo para testar o enquadramento antes de rodar bonito.
+  rapida    256 px com um retoque de nitidez leve.
+  boa       512 px (padrão na GPU). O equilíbrio para o dia a dia.
+  maxima    1024 px + CodeFormer + expressão da pessoa do vídeo. Mais detalhe e
+            bem mais lento; numa placa de 4 GB pode faltar memória — aí use "boa".
+
+A máscara segue o contorno do rosto (não um retângulo), então a borda fica
+natural e o rosto não sai plástico.
+
+
+ONDE FICA CADA COISA
+--------------------
+  local\                      (no projeto, vai pro git) os programas e os .bat
+  facefusion-local\           (ao lado do projeto, FORA do git) o pesado:
+    facefusion\               o FaceFusion e os modelos
+    venv\                     o Python próprio
+    bin\                      o ffmpeg
+    entrada\                  ponha aqui a foto e o vídeo
+    saida\                    os vídeos prontos saem aqui
+
+Para instalar em outro lugar, defina a variável WAN_FACE_LOCAL antes de rodar.
+
+
+Use apenas imagens e vídeos de pessoas que autorizaram o uso.
