@@ -63,8 +63,14 @@ No Colab: *Ambiente de execução → Alterar o tipo de ambiente → GPU T4*.
 **Para usar:** clique em **Run All**. Em uns 5 minutos a segunda célula mostra o link e o
 código de conexão; depois da primeira vez, o site conecta sozinho. __DOWNLOADS__
 
-**Para não gastar cota à toa:** a sessão se encerra sozinha depois de `IDLE_MINUTES` sem uso.
-Para deixar rodando sem esta aba aberta, use *Save Version → Save & Run All (Commit)*.
+**Vídeo demorado, ou vai sair de perto?** O Kaggle **desliga a sessão interativa depois de
+~60 min sem você mexer NESTA página do Kaggle** (mexer no site, em outra aba, não conta) — mesmo
+com um vídeo ainda sendo gerado. Para deixar gerando e voltar depois, use *Save Version → Save &
+Run All (Commit)*: é um **processo em segundo plano, sem esse limite de inatividade** (vai até o
+teto de ~9–12 h da sessão), e o site se conecta sozinho a ele.
+
+**Para não gastar cota à toa:** a sessão também se encerra sozinha depois de `IDLE_MINUTES` sem
+uso de verdade — nunca no meio de um vídeo (enquanto gera, ela se marca "em uso").
 """
 
 DOWNLOADS = {
